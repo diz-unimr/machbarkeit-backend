@@ -1,4 +1,4 @@
-use axum::extract::{State, WebSocketUpgrade};
+use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::{debug_handler, Json, Router};
 use http::StatusCode;
 
@@ -14,6 +14,7 @@ use futures_util::{
     stream::{SplitStream, StreamExt},
 };
 use http::header::LOCATION;
+use log::error;
 use serde_derive::{Deserialize, Serialize};
 use sqlx::types::Uuid;
 use sqlx::FromRow;
@@ -23,6 +24,7 @@ use tracing::log::{debug, info};
 pub(crate) fn router() -> Router<Arc<ApiContext>> {
     Router::new()
         .route("/feasibility/request", post(create))
+        .route("/feasibility/request/{id}", get(read))
         .route("/feasibility/ws", get(ws_handler))
 }
 
@@ -42,7 +44,7 @@ impl Into<String> for QueryState {
     }
 }
 
-#[derive(Deserialize, Serialize, FromRow, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, FromRow, Debug, PartialEq, Clone)]
 struct FeasibilityRequest {
     id: Uuid,
     date: DateTime<Utc>,
@@ -135,9 +137,9 @@ async fn create(
 
     let result: FeasibilityRequest = sqlx::query_as!(
         FeasibilityRequest,
-        // r#"insert into requests (id,date,query,status,result,duration,error) values ($1,$2,$3,$4,$5,$6,$7) returning (id,date,query,status,result,duration,error)"#,
         r#"insert into requests (id,date,query,status,result,duration,error) values ($1,$2,$3,$4,$5,$6,$7)
-            returning id as "id!:_",date as "date!:_" ,query as "query!:_",status as "status!:_",result,duration,error"#,
+           returning id as "id!:_",date as "date!:_" ,query as "query!:_",
+                     status as "status!:_", result,duration,error"#,
         request.id,
         request.date,
         request.query,
@@ -147,7 +149,6 @@ async fn create(
         request.error,
     )
     .fetch_one(&ctx.db)
-    // .execute(&ctx.db)
     .await?;
 
     // broadcast request
@@ -164,12 +165,33 @@ async fn create(
     ))
 }
 
+#[debug_handler]
+async fn read(
+    State(ctx): State<Arc<ApiContext>>,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let result = sqlx::query_as!(
+        FeasibilityRequest,
+        r#"select id as "id!:_",date as "date!:_" ,query as "query!:_",status as "status!:_",result,duration,error
+        from requests where id = $1"#,
+        id
+    )
+        .fetch_optional(&ctx.db)
+        .await?;
+    match result {
+        Some(r) => match r.status {
+            QueryState::Pending => Ok(StatusCode::OK.into_response()),
+            QueryState::Completed => Ok((StatusCode::FOUND, Json(r)).into_response()),
+        },
+        None => Ok(StatusCode::NOT_FOUND.into_response()),
+    }
+}
+
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<ApiContext>>,
-) -> impl axum::response::IntoResponse {
+) -> impl IntoResponse {
     info!("Upgrading websocket connection");
-    tracing::info!("Upgrading websocket connection");
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 
@@ -187,14 +209,20 @@ async fn handle_socket(socket: WebSocket, state: Arc<ApiContext>) {
     });
 
     // read incoming messages
-    tokio::spawn(read(stream));
+    tokio::spawn(ws_read(stream, state));
 }
 
-async fn read(mut receiver: SplitStream<WebSocket>) {
+async fn ws_read(mut receiver: SplitStream<WebSocket>, state: Arc<ApiContext>) {
     while let Some(Ok(msg)) = receiver.next().await {
         match msg {
             Message::Text(msg) => {
                 debug!("Message received: {}", msg);
+
+                // store result
+                let request = serde_json::from_str::<FeasibilityRequest>(&msg).unwrap();
+                if let Err(err) = store_result(request, state.clone()).await {
+                    error!("Failed to store feasibility result: {}", err);
+                }
             }
             Message::Close(_) => {
                 debug!("Closing WebSocket connection");
@@ -203,6 +231,28 @@ async fn read(mut receiver: SplitStream<WebSocket>) {
             _ => {}
         }
     }
+}
+
+async fn store_result(
+    request: FeasibilityRequest,
+    state: Arc<ApiContext>,
+) -> Result<(), anyhow::Error> {
+    sqlx::query_as!(
+        FeasibilityRequest,
+        r#"update requests set
+           status = $1, result = $2, duration = $3, error = $4
+           where id = $5"#,
+        // returning id as "id!:_",date as "date!:_" ,query as "query!:_",status as "status!:_",result,duration,error"#,
+        request.status,
+        request.result,
+        request.duration,
+        request.error,
+        request.id
+    )
+    .execute(&state.db)
+    .await?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -220,8 +270,6 @@ mod tests {
             base_url: "http://localhost".to_string(),
             sender,
         });
-        // todo: add test for 'service unavailable'
-        // let _receiver = state.sender.subscribe();
 
         // test server
         let router = router().with_state(state);
@@ -292,5 +340,60 @@ mod tests {
 
         // assert
         response.assert_status(StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[sqlx::test]
+    async fn websocket_read_test(pool: SqlitePool) {
+        let (sender, _) = broadcast::channel(1);
+        let state = Arc::new(ApiContext {
+            db: pool,
+            base_url: "http://localhost".to_string(),
+            sender,
+        });
+
+        // test server
+        let router = router().with_state(state);
+        let server = TestServer::builder()
+            .http_transport()
+            .build(router)
+            .unwrap();
+
+        let mut websocket = server
+            .get_websocket(&"/feasibility/ws")
+            .await
+            .into_websocket()
+            .await;
+
+        // request data
+        let query = FeasibilityQuery {
+            version: "1".to_string(),
+            display: "one".to_string(),
+            inclusion_criteria: vec![],
+            exclusion_criteria: vec![],
+        };
+
+        // send request
+        let response = server.post("/feasibility/request").json(&query).await;
+
+        // set feasibility result
+        let mut updated = response.json::<FeasibilityRequest>();
+        updated.status = QueryState::Completed;
+        updated.result = Some(42);
+        updated.duration = Some(600);
+
+        let msg = updated.clone();
+        // send message through websocket
+        tokio::spawn(async move { websocket.send_json(&msg).await })
+            .await
+            .unwrap();
+
+        // check if updated
+        let response = server
+            .get(format!("/feasibility/request/{}", updated.id).as_str())
+            .await;
+
+        // assert
+        response.assert_status(StatusCode::FOUND);
+        response.assert_json(&updated);
     }
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "insert into requests (id,date,query,status,result,duration,error) values ($1,$2,$3,$4,$5,$6,$7)\n            returning id as \"id!:_\",date as \"date!:_\" ,query as \"query!:_\",status as \"status!:_\",result,duration,error",
+  "query": "insert into requests (id,date,query,status,result,duration,error) values ($1,$2,$3,$4,$5,$6,$7)\n           returning id as \"id!:_\",date as \"date!:_\" ,query as \"query!:_\",\n                     status as \"status!:_\", result,duration,error",
   "describe": {
     "columns": [
       {
@@ -52,5 +52,5 @@
       true
     ]
   },
-  "hash": "14f6d800fe36c91800bc5604f81da72f26f4bcef21c3f60a394cfc096d6d93cf"
+  "hash": "da099c013d25334c0bd9edfdea1bf1785399bc4a34a06154b06f9892747c00c0"
 }
