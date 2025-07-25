@@ -274,10 +274,7 @@ mod tests {
 
         // test server
         let router = router().with_state(state);
-        let server = TestServer::builder()
-            .http_transport()
-            .build(router)
-            .unwrap();
+        let server = TestServer::new(router).unwrap();
 
         // request data
         let query = FeasibilityQuery {
