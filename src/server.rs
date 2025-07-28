@@ -28,15 +28,6 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| filter.into()))
         .init();
 
-    // let mut db_opts = SqlitePoolOptions::new();
-    //     db_opts.max_connections(100)
-    //     .min_connections(5)
-    //     .acquire_timeout(Duration::from_secs(8))
-    //     .idle_timeout(Duration::from_secs(8))
-    //     .max_lifetime(Duration::from_secs(8))
-    //     .sqlx_logging(true)
-    //     .sqlx_logging_level(log::LevelFilter::Info);
-
     let db = SqlitePool::connect("sqlite://db.sqlite?mode=rwc").await?;
 
     let (sender, _) = broadcast::channel(10);
