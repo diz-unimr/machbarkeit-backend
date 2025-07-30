@@ -337,7 +337,7 @@ mod tests {
             .await;
 
         // assert
-        response.assert_status(StatusCode::FOUND);
+        response.assert_status(StatusCode::OK);
         response.assert_text(&updated.result_body.unwrap());
     }
 }
