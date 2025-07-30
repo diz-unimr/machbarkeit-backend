@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "select id as \"id!:_\",date as \"date!:_\" ,query as \"query!:_\",status as \"status!:_\",result_code as \"result_code:_\",result_body,result_duration as \"result_duration:_\"\n        from requests where id = $1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!:_",
+        "ordinal": 0,
+        "type_info": "Null"
+      },
+      {
+        "name": "date!:_",
+        "ordinal": 1,
+        "type_info": "Null"
+      },
+      {
+        "name": "query!:_",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!:_",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "result_code:_",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "result_body",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "result_duration:_",
+        "ordinal": 6,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "cb5476fd2bcac704956a71a75a9da7d8a147b72db5888dc4a4dee561cad30087"
+}

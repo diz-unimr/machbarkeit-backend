@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "update requests set\n           status = $1, result_code = $2, result_body = $3, result_duration = $4\n           where id = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "5a264169317000fdfeb6cf0f3b71878b4aa8eebf3c2c1f6e0ce48fae675e9b8a"
+}

@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "insert into requests (id,date,query,status,result_code,result_body,result_duration) values ($1,$2,$3,$4,$5,$6,$7)\n           returning id as \"id!:_\",date as \"date!:_\" ,query as \"query!:_\",\n                     status as \"status!:_\", result_code as \"result_code:_\",result_body,result_duration as \"result_duration:_\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!:_",
+        "ordinal": 0,
+        "type_info": "Null"
+      },
+      {
+        "name": "date!:_",
+        "ordinal": 1,
+        "type_info": "Null"
+      },
+      {
+        "name": "query!:_",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!:_",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "result_code:_",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "result_body",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "result_duration:_",
+        "ordinal": 6,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "522fc93bad2587af0d88e54d996f42c83030950fcdb93f9b8e2b5b64ae7f5b43"
+}
