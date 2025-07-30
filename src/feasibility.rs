@@ -1,6 +1,6 @@
 use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::{debug_handler, Json, Router};
-use http::StatusCode;
+use http::{header, StatusCode};
 
 use crate::error::ApiError;
 use crate::server::ApiContext;
@@ -16,7 +16,7 @@ use futures_util::{
 use http::header::LOCATION;
 use log::error;
 use serde_derive::{Deserialize, Serialize};
-use sqlx::types::Uuid;
+use sqlx::types::{JsonValue, Uuid};
 use sqlx::FromRow;
 use std::sync::Arc;
 use tracing::log::{debug, info};
@@ -30,6 +30,7 @@ pub(crate) fn router() -> Router<Arc<ApiContext>> {
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, sqlx::Type, Deserialize, Serialize)]
 #[sqlx(type_name = "status", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 enum QueryState {
     Pending,
     Completed,
@@ -48,75 +49,20 @@ impl Into<String> for QueryState {
 struct FeasibilityRequest {
     id: Uuid,
     date: DateTime<Utc>,
-    query: sqlx::types::Json<FeasibilityQuery>,
+    query: JsonValue,
     status: QueryState,
     #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<i64>,
+    result_code: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    duration: Option<i64>,
+    result_body: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-}
-
-#[derive(Deserialize, Serialize, FromRow, Debug, Clone, PartialEq)]
-#[serde(rename_all = "camelCase")]
-struct FeasibilityQuery {
-    version: String,
-    display: String,
-    inclusion_criteria: Vec<Vec<Criterion>>,
-    exclusion_criteria: Vec<Vec<String>>,
-}
-
-impl Into<FeasibilityRequest> for FeasibilityQuery {
-    fn into(self) -> FeasibilityRequest {
-        FeasibilityRequest {
-            id: Default::default(),
-            date: Default::default(),
-            query: sqlx::types::Json(self),
-            status: QueryState::Pending,
-            result: None,
-            duration: None,
-            error: None,
-        }
-    }
-}
-
-#[derive(Deserialize, Serialize, FromRow, Debug, Clone, PartialEq)]
-#[serde(rename_all = "camelCase")]
-struct Criterion {
-    id: String,
-    term_codes: Vec<Coding>,
-    context: Module,
-    time_restriction: Option<TimeConstraint>,
-}
-
-#[derive(Deserialize, Serialize, FromRow, Debug, Clone, PartialEq)]
-#[serde(rename_all = "camelCase")]
-struct TimeConstraint {
-    before_date: Option<String>,
-    after_date: Option<String>,
-}
-
-#[derive(Deserialize, Serialize, FromRow, Clone, Debug, PartialEq)]
-struct Coding {
-    code: String,
-    system: String,
-    display: String,
-    version: Option<String>,
-}
-
-#[derive(Deserialize, Serialize, FromRow, Clone, Debug, PartialEq)]
-struct Module {
-    code: String,
-    system: String,
-    display: String,
-    version: Option<String>,
+    result_duration: Option<u32>,
 }
 
 #[debug_handler]
 async fn create(
     State(ctx): State<Arc<ApiContext>>,
-    Json(query): Json<FeasibilityQuery>,
+    Json(query): Json<JsonValue>,
 ) -> Result<impl IntoResponse, ApiError> {
     if ctx.sender.receiver_count() < 1 {
         return Err(ApiError(
@@ -128,25 +74,25 @@ async fn create(
     let request = FeasibilityRequest {
         id: Uuid::new_v4(),
         date: Utc::now(),
-        query: sqlx::types::Json(query),
+        query,
         status: QueryState::Pending,
-        result: None,
-        duration: None,
-        error: None,
+        result_code: None,
+        result_body: None,
+        result_duration: None,
     };
 
     let result: FeasibilityRequest = sqlx::query_as!(
         FeasibilityRequest,
-        r#"insert into requests (id,date,query,status,result,duration,error) values ($1,$2,$3,$4,$5,$6,$7)
+        r#"insert into requests (id,date,query,status,result_code,result_body,result_duration) values ($1,$2,$3,$4,$5,$6,$7)
            returning id as "id!:_",date as "date!:_" ,query as "query!:_",
-                     status as "status!:_", result,duration,error"#,
+                     status as "status!:_", result_code as "result_code:_",result_body,result_duration as "result_duration:_""#,
         request.id,
         request.date,
         request.query,
         request.status,
-        request.result,
-        request.duration,
-        request.error,
+        request.result_code,
+        request.result_body,
+        request.result_duration,
     )
     .fetch_one(&ctx.db)
     .await?;
@@ -170,9 +116,9 @@ async fn read(
     State(ctx): State<Arc<ApiContext>>,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let result = sqlx::query_as!(
+    let result:Option<FeasibilityRequest> = sqlx::query_as!(
         FeasibilityRequest,
-        r#"select id as "id!:_",date as "date!:_" ,query as "query!:_",status as "status!:_",result,duration,error
+        r#"select id as "id!:_",date as "date!:_" ,query as "query!:_",status as "status!:_",result_code as "result_code:_",result_body,result_duration as "result_duration:_"
         from requests where id = $1"#,
         id
     )
@@ -180,8 +126,19 @@ async fn read(
         .await?;
     match result {
         Some(r) => match r.status {
-            QueryState::Pending => Ok(StatusCode::OK.into_response()),
-            QueryState::Completed => Ok((StatusCode::FOUND, Json(r)).into_response()),
+            QueryState::Pending => Ok(StatusCode::NOT_FOUND.into_response()),
+            QueryState::Completed => {
+                let body = r.result_body.clone().unwrap_or_default();
+                let resp = (
+                    StatusCode::from_u16(r.result_code.unwrap_or(StatusCode::FOUND.as_u16()))
+                        .unwrap_or(StatusCode::FOUND),
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    body,
+                )
+                    .into_response();
+
+                Ok(resp)
+            }
         },
         None => Ok(StatusCode::NOT_FOUND.into_response()),
     }
@@ -213,6 +170,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<ApiContext>) {
 }
 
 async fn ws_read(mut receiver: SplitStream<WebSocket>, state: Arc<ApiContext>) {
+    info!("Reading websocket connection");
     while let Some(Ok(msg)) = receiver.next().await {
         match msg {
             Message::Text(msg) => {
@@ -228,7 +186,7 @@ async fn ws_read(mut receiver: SplitStream<WebSocket>, state: Arc<ApiContext>) {
                 debug!("Closing WebSocket connection");
                 break;
             }
-            _ => {}
+            _ => error!("Unexpected message type"),
         }
     }
 }
@@ -240,13 +198,13 @@ async fn store_result(
     sqlx::query_as!(
         FeasibilityRequest,
         r#"update requests set
-           status = $1, result = $2, duration = $3, error = $4
+           status = $1, result_code = $2, result_body = $3, result_duration = $4
            where id = $5"#,
         // returning id as "id!:_",date as "date!:_" ,query as "query!:_",status as "status!:_",result,duration,error"#,
         request.status,
-        request.result,
-        request.duration,
-        request.error,
+        request.result_code,
+        request.result_body,
+        request.result_duration,
         request.id
     )
     .execute(&state.db)
@@ -284,13 +242,8 @@ mod tests {
             .into_websocket()
             .await;
 
-        // request data
-        let query = FeasibilityQuery {
-            version: "1".to_string(),
-            display: "one".to_string(),
-            inclusion_criteria: vec![],
-            exclusion_criteria: vec![],
-        };
+        // dummy request data
+        let query = JsonValue::Object(Default::default());
 
         // send request
         let response = server
@@ -324,13 +277,8 @@ mod tests {
         let router = router().with_state(state);
         let server = TestServer::new(router).unwrap();
 
-        // request data
-        let query = FeasibilityQuery {
-            version: "2".to_string(),
-            display: "two".to_string(),
-            inclusion_criteria: vec![],
-            exclusion_criteria: vec![],
-        };
+        // dummy request data
+        let query = JsonValue::Object(Default::default());
 
         // send request
         let response = server
@@ -364,13 +312,8 @@ mod tests {
             .into_websocket()
             .await;
 
-        // request data
-        let query = FeasibilityQuery {
-            version: "1".to_string(),
-            display: "one".to_string(),
-            inclusion_criteria: vec![],
-            exclusion_criteria: vec![],
-        };
+        // dummy request data
+        let query = JsonValue::Object(Default::default());
 
         // send request
         let response = server.post("/feasibility/request").json(&query).await;
@@ -378,8 +321,9 @@ mod tests {
         // set feasibility result
         let mut updated = response.json::<FeasibilityRequest>();
         updated.status = QueryState::Completed;
-        updated.result = Some(42);
-        updated.duration = Some(600);
+        updated.result_code = Some(200);
+        updated.result_body = Some("42".to_string());
+        updated.result_duration = Some(600);
 
         let msg = updated.clone();
         // send message through websocket
@@ -387,13 +331,13 @@ mod tests {
             .await
             .unwrap();
 
-        // check if updated
+        // check result
         let response = server
             .get(format!("/feasibility/request/{}", updated.id).as_str())
             .await;
 
         // assert
         response.assert_status(StatusCode::FOUND);
-        response.assert_json(&updated);
+        response.assert_text(&updated.result_body.unwrap());
     }
 }
