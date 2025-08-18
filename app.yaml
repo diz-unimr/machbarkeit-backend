@@ -1,3 +1,7 @@
-app:
-  log_level: debug
+log_level: debug
 base_url: http://localhost:3000
+auth:
+  oidc:
+    issuer:
+    client_id:
+    client_secret:
