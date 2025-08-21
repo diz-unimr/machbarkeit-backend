@@ -2,7 +2,7 @@ use crate::config::AppConfig;
 use crate::feasibility::api;
 use crate::feasibility::websocket;
 use axum::error_handling::HandleErrorLayer;
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
 use axum::{routing::get, Router};
 use axum_oidc::error::MiddlewareError;
 use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
@@ -13,14 +13,13 @@ use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tower::ServiceBuilder;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tower_sessions::{
     cookie::{time::Duration, SameSite}, Expiry, MemoryStore,
     SessionManagerLayer,
 };
 use tracing::log;
-use tracing_subscriber::fmt::layer;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
@@ -51,45 +50,9 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
         sender,
     });
 
-    // oidc authentication
-    // TODO
-    // let session_store = MemoryStore::default();
-    // let session_layer = SessionManagerLayer::new(session_store)
-    //     .with_secure(false)
-    //     .with_same_site(SameSite::Lax)
-    //     .with_expiry(Expiry::OnInactivity(Duration::seconds(120)));
-    //
-    // let oidc_login_service = ServiceBuilder::new()
-    //     .layer(HandleErrorLayer::new(|e: MiddlewareError| async {
-    //         e.into_response()
-    //     }))
-    //     .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new());
-    //
-    // let oidc = config.auth.unwrap().oidc.unwrap();
-    // let oidc_auth = ServiceBuilder::new()
-    //     .layer(HandleErrorLayer::new(|e: MiddlewareError| async {
-    //         e.into_response()
-    //     }))
-    //     .layer(
-    //         OidcAuthLayer::<EmptyAdditionalClaims>::discover_client(
-    //             Uri::from_maybe_shared(config.base_url)?,
-    //             oidc.issuer.unwrap(),
-    //             oidc.client_id.unwrap(),
-    //             Some(oidc.client_secret.unwrap()),
-    //             vec![],
-    //         )
-    //         .await?,
-    //     );
-
-    let router = api_router(state);
-    // let oidc_services = ServiceBuilder::new()
-    //     .layer(oidc_login_service)
-    //     .layer(oidc_auth)
-    //     .layer(session_layer);
-    //
-    //                         .layer(oidc_login_service)
-    //                             .layer(oidc_auth)
-    //                             .layer(session_layer););
+    let router = api_router(state, config)
+        .await
+        .expect("Failed to create router");
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     debug!("listening on {}", listener.local_addr()?);
@@ -100,14 +63,55 @@ async fn root() -> &'static str {
     "Machbarkeit Web API"
 }
 
-fn api_router(state: Arc<ApiContext>) -> Router {
-    Router::new()
+async fn api_router(state: Arc<ApiContext>, config: AppConfig) -> Result<Router, anyhow::Error> {
+    let session_store = MemoryStore::default();
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_secure(false)
+        .with_same_site(SameSite::Lax)
+        .with_expiry(Expiry::OnInactivity(Duration::seconds(120)));
+
+    let oidc_login_service = ServiceBuilder::new()
+        .layer(HandleErrorLayer::new(|e: MiddlewareError| async {
+            e.into_response()
+        }))
+        .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new());
+
+    let oidc = config.auth.unwrap().oidc.unwrap();
+    let oidc_auth = ServiceBuilder::new()
+        .layer(HandleErrorLayer::new(|e: MiddlewareError| async {
+            e.into_response()
+        }))
+        .layer(
+            OidcAuthLayer::<EmptyAdditionalClaims>::discover_client(
+                Uri::from_maybe_shared(config.base_url)?,
+                oidc.issuer.unwrap(),
+                oidc.client_id.unwrap(),
+                Some(oidc.client_secret.unwrap()),
+                vec![],
+            )
+            .await?,
+        );
+
+    Ok(Router::new()
         .route("/", get(root))
-        .merge(api::router())
+        .merge(
+            api::router()
+                .layer(oidc_login_service)
+                .layer(oidc_auth)
+                .layer(session_layer),
+        )
         .merge(websocket::router())
         .with_state(state)
         .layer(TraceLayer::new_for_http())
-        .layer(CorsLayer::permissive())
+        // .layer(
+        //     CorsLayer::new()
+        //         .allow_origin("http://localhost:5173".parse::<HeaderValue>()?)
+        //         .allow_credentials(true)
+        //         .allow_headers(Any)
+        //         .allow_methods(Any)
+        //         .expose_headers(Any),
+        // )
+        .layer(CorsLayer::very_permissive()))
 }
 
 #[cfg(test)]
@@ -125,7 +129,7 @@ mod tests {
         });
 
         // test server
-        let router = api_router(state);
+        let router = api_router(state, AppConfig::default()).await.unwrap();
         let server = TestServer::new(router).unwrap();
 
         // send request
