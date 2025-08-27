@@ -19,7 +19,6 @@ pub(crate) fn router() -> Router<Arc<ApiContext>> {
     Router::new()
         .route("/feasibility/request", post(create))
         .route("/feasibility/request/{id}", get(read))
-    // .route("/feasibility/ws", get(ws_handler))
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, sqlx::Type, Deserialize, Serialize)]

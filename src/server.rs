@@ -1,4 +1,4 @@
-use crate::config::AppConfig;
+use crate::config::{AppConfig, Cors};
 use crate::feasibility::api;
 use crate::feasibility::websocket;
 use auth::users::Backend;
@@ -49,7 +49,7 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
         sender,
     });
 
-    let router = api_router(state, config)
+    let router = build_router(state, config)
         .await
         .expect("Failed to create router");
 
@@ -62,64 +62,71 @@ async fn root() -> &'static str {
     "Machbarkeit Web API"
 }
 
-async fn api_router(state: Arc<ApiContext>, config: AppConfig) -> Result<Router, anyhow::Error> {
-    let session_store = MemoryStore::default();
-    let session_layer = SessionManagerLayer::new(session_store)
-        .with_secure(false)
-        .with_same_site(SameSite::Lax)
-        .with_expiry(Expiry::OnInactivity(Duration::seconds(120)));
-
-    let oidc_config = config.auth.unwrap().oidc.unwrap();
-
-    let client_id = oidc_config
-        .client_id
-        .map(ClientId::new)
-        .expect("CLIENT_ID should be provided.");
-    let client_secret = oidc_config
-        .client_secret
-        .map(ClientSecret::new)
-        .expect("CLIENT_SECRET should be provided.");
-
-    let auth_url = AuthUrl::new(oidc_config.auth_endpoint.unwrap())?;
-    let token_url = TokenUrl::new(oidc_config.token_endpoint.unwrap())?;
-
-    let client = BasicClient::new(client_id)
-        .set_client_secret(client_secret)
-        .set_auth_uri(auth_url)
-        .set_token_uri(token_url)
-        .set_redirect_uri(RedirectUrl::new(
-            "http://localhost:3000/oauth/callback".to_string(),
-        )?);
-
-    // todo
-    let db = SqlitePool::connect(":memory:").await?;
-
-    let backend = Backend::new(db, client, oidc_config.userinfo_endpoint.unwrap()).await;
-    let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
-
-    Ok(Router::new()
+async fn build_router(state: Arc<ApiContext>, config: AppConfig) -> Result<Router, anyhow::Error> {
+    let router = Router::new()
         .route("/", get(root))
-        .merge(
-            api::router()
-                .route_layer(login_required!(Backend, login_url = "/login"))
-                .merge(crate::auth::router())
-                .layer(auth_layer),
-        )
+        .merge(build_api_router(config.clone()).await?)
         .merge(websocket::router())
         .with_state(state)
         .layer(TraceLayer::new_for_http())
-        .layer(
-            CorsLayer::new()
-                .allow_origin(
-                    config
-                        .cors
-                        .unwrap()
-                        .allow_origin
-                        .unwrap()
-                        .parse::<HeaderValue>()?,
-                )
-                .allow_credentials(true),
-        ))
+        .layer(build_cors_layer(config.cors)?);
+
+    Ok(router)
+}
+
+fn build_cors_layer(config: Option<Cors>) -> Result<CorsLayer, anyhow::Error> {
+    if let Some(origin) = config.and_then(|c| c.allow_origin) {
+        Ok(CorsLayer::new()
+            .allow_credentials(true)
+            .allow_origin(origin.parse::<HeaderValue>()?))
+    } else {
+        Ok(CorsLayer::default())
+    }
+}
+
+async fn build_api_router(config: AppConfig) -> Result<Router<Arc<ApiContext>>, anyhow::Error> {
+    let router = api::router();
+
+    // oidc auth
+    if let Some(oidc_config) = config.auth.and_then(|auth| auth.oidc) {
+        let session_store = MemoryStore::default();
+        let session_layer = SessionManagerLayer::new(session_store)
+            .with_secure(false)
+            .with_same_site(SameSite::Lax)
+            .with_expiry(Expiry::OnInactivity(Duration::seconds(120)));
+
+        let client_id = oidc_config
+            .client_id
+            .map(ClientId::new)
+            .expect("CLIENT_ID should be provided.");
+        let client_secret = oidc_config
+            .client_secret
+            .map(ClientSecret::new)
+            .expect("CLIENT_SECRET should be provided.");
+
+        let auth_url = AuthUrl::new(oidc_config.auth_endpoint.unwrap())?;
+        let token_url = TokenUrl::new(oidc_config.token_endpoint.unwrap())?;
+
+        let client = BasicClient::new(client_id)
+            .set_client_secret(client_secret)
+            .set_auth_uri(auth_url)
+            .set_token_uri(token_url)
+            .set_redirect_uri(RedirectUrl::new(format!(
+                "{}/oauth/callback",
+                config.base_url
+            ))?);
+
+        let db = SqlitePool::connect(":memory:").await?;
+        let backend = Backend::new(db, client, oidc_config.userinfo_endpoint.unwrap()).await;
+        let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
+
+        Ok(router
+            .route_layer(login_required!(Backend, login_url = "/login"))
+            .merge(crate::auth::router())
+            .layer(auth_layer))
+    } else {
+        Ok(router)
+    }
 }
 
 #[cfg(test)]
@@ -137,7 +144,7 @@ mod tests {
         });
 
         // test server
-        let router = api_router(state, AppConfig::default()).await.unwrap();
+        let router = build_router(state, AppConfig::default()).await.unwrap();
         let server = TestServer::new(router).unwrap();
 
         // send request
