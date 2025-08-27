@@ -6,6 +6,7 @@ pub(crate) struct AppConfig {
     pub(crate) log_level: String,
     pub(crate) base_url: String,
     pub(crate) auth: Option<Auth>,
+    pub(crate) cors: Option<Cors>,
 }
 
 #[derive(Default, Deserialize, Clone)]
@@ -15,9 +16,16 @@ pub(crate) struct Auth {
 
 #[derive(Default, Deserialize, Clone)]
 pub(crate) struct Oidc {
-    pub(crate) issuer: Option<String>,
     pub(crate) client_id: Option<String>,
     pub(crate) client_secret: Option<String>,
+    pub(crate) auth_endpoint: Option<String>,
+    pub(crate) token_endpoint: Option<String>,
+    pub(crate) userinfo_endpoint: Option<String>,
+}
+
+#[derive(Default, Deserialize, Clone)]
+pub(crate) struct Cors {
+    pub(crate) allow_origin: Option<String>,
 }
 
 impl AppConfig {

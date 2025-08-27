@@ -1,19 +1,18 @@
 use crate::config::AppConfig;
 use crate::feasibility::api;
 use crate::feasibility::websocket;
-use axum::error_handling::HandleErrorLayer;
-use axum::response::IntoResponse;
+use auth::users::Backend;
 use axum::{routing::get, Router};
-use axum_oidc::error::MiddlewareError;
-use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
+use axum_login::{login_required, AuthManagerLayerBuilder};
 use broadcast::Sender;
-use http::Uri;
+use http::HeaderValue;
 use log::debug;
+use oauth2::basic::BasicClient;
+use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tower::ServiceBuilder;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tower_sessions::{
     cookie::{time::Duration, SameSite}, Expiry, MemoryStore,
@@ -70,48 +69,57 @@ async fn api_router(state: Arc<ApiContext>, config: AppConfig) -> Result<Router,
         .with_same_site(SameSite::Lax)
         .with_expiry(Expiry::OnInactivity(Duration::seconds(120)));
 
-    let oidc_login_service = ServiceBuilder::new()
-        .layer(HandleErrorLayer::new(|e: MiddlewareError| async {
-            e.into_response()
-        }))
-        .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new());
+    let oidc_config = config.auth.unwrap().oidc.unwrap();
 
-    let oidc = config.auth.unwrap().oidc.unwrap();
-    let oidc_auth = ServiceBuilder::new()
-        .layer(HandleErrorLayer::new(|e: MiddlewareError| async {
-            e.into_response()
-        }))
-        .layer(
-            OidcAuthLayer::<EmptyAdditionalClaims>::discover_client(
-                Uri::from_maybe_shared(config.base_url)?,
-                oidc.issuer.unwrap(),
-                oidc.client_id.unwrap(),
-                Some(oidc.client_secret.unwrap()),
-                vec![],
-            )
-            .await?,
-        );
+    let client_id = oidc_config
+        .client_id
+        .map(ClientId::new)
+        .expect("CLIENT_ID should be provided.");
+    let client_secret = oidc_config
+        .client_secret
+        .map(ClientSecret::new)
+        .expect("CLIENT_SECRET should be provided.");
+
+    let auth_url = AuthUrl::new(oidc_config.auth_endpoint.unwrap())?;
+    let token_url = TokenUrl::new(oidc_config.token_endpoint.unwrap())?;
+
+    let client = BasicClient::new(client_id)
+        .set_client_secret(client_secret)
+        .set_auth_uri(auth_url)
+        .set_token_uri(token_url)
+        .set_redirect_uri(RedirectUrl::new(
+            "http://localhost:3000/oauth/callback".to_string(),
+        )?);
+
+    // todo
+    let db = SqlitePool::connect(":memory:").await?;
+
+    let backend = Backend::new(db, client, oidc_config.userinfo_endpoint.unwrap()).await;
+    let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
     Ok(Router::new()
         .route("/", get(root))
         .merge(
             api::router()
-                .layer(oidc_login_service)
-                .layer(oidc_auth)
-                .layer(session_layer),
+                .route_layer(login_required!(Backend, login_url = "/login"))
+                .merge(crate::auth::router())
+                .layer(auth_layer),
         )
         .merge(websocket::router())
         .with_state(state)
         .layer(TraceLayer::new_for_http())
-        // .layer(
-        //     CorsLayer::new()
-        //         .allow_origin("http://localhost:5173".parse::<HeaderValue>()?)
-        //         .allow_credentials(true)
-        //         .allow_headers(Any)
-        //         .allow_methods(Any)
-        //         .expose_headers(Any),
-        // )
-        .layer(CorsLayer::very_permissive()))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(
+                    config
+                        .cors
+                        .unwrap()
+                        .allow_origin
+                        .unwrap()
+                        .parse::<HeaderValue>()?,
+                )
+                .allow_credentials(true),
+        ))
 }
 
 #[cfg(test)]

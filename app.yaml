@@ -2,6 +2,10 @@ log_level: debug
 base_url: http://localhost:3000
 auth:
   oidc:
-    issuer:
     client_id:
     client_secret:
+    auth_endpoint:
+    token_endpoint:
+    userinfo_endpoint:
+cors:
+  allow_origin:

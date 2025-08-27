@@ -1,0 +1,20 @@
+[package]
+name = "auth"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "auth"
+path = "src/lib.rs"
+
+[dependencies]
+axum-login = "0.18.0"
+axum = "0.8.4"
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "time", "chrono", "migrate"] }
+reqwest = { version = "0.12.23", features = ["json"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_derive = "1.0.219"
+oauth2 = "5.0.0"
+thiserror = "2.0.12"
+log = "0.4.27"
