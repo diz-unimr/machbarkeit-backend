@@ -1,3 +1,4 @@
 /target
+/auth/target
 .idea
 db.sqlite
