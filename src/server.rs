@@ -49,7 +49,7 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
         sender,
     });
 
-    let router = build_router(state, config)
+    let router = build_router(state, &config)
         .await
         .expect("Failed to create router");
 
@@ -62,14 +62,14 @@ async fn root() -> &'static str {
     "Machbarkeit Web API"
 }
 
-async fn build_router(state: Arc<ApiContext>, config: AppConfig) -> Result<Router, anyhow::Error> {
+async fn build_router(state: Arc<ApiContext>, config: &AppConfig) -> Result<Router, anyhow::Error> {
     let router = Router::new()
         .route("/", get(root))
-        .merge(build_api_router(config.clone()).await?)
+        .merge(build_api_router(config).await?)
         .merge(websocket::router())
         .with_state(state)
         .layer(TraceLayer::new_for_http())
-        .layer(build_cors_layer(config.cors)?);
+        .layer(build_cors_layer(config.clone().cors)?);
 
     Ok(router)
 }
@@ -84,11 +84,11 @@ fn build_cors_layer(config: Option<Cors>) -> Result<CorsLayer, anyhow::Error> {
     }
 }
 
-async fn build_api_router(config: AppConfig) -> Result<Router<Arc<ApiContext>>, anyhow::Error> {
+async fn build_api_router(config: &AppConfig) -> Result<Router<Arc<ApiContext>>, anyhow::Error> {
     let router = api::router();
 
     // oidc auth
-    if let Some(oidc_config) = config.auth.and_then(|auth| auth.oidc) {
+    if let Some(oidc_config) = config.clone().auth.and_then(|auth| auth.oidc) {
         let session_store = MemoryStore::default();
         let session_layer = SessionManagerLayer::new(session_store)
             .with_secure(false)
@@ -132,7 +132,10 @@ async fn build_api_router(config: AppConfig) -> Result<Router<Arc<ApiContext>>, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{Auth, Oidc};
     use axum_test::TestServer;
+    use http::StatusCode;
+    use urlencoding::Encoded;
 
     #[sqlx::test]
     async fn root_test(pool: SqlitePool) {
@@ -144,7 +147,7 @@ mod tests {
         });
 
         // test server
-        let router = build_router(state, AppConfig::default()).await.unwrap();
+        let router = build_router(state, &AppConfig::default()).await.unwrap();
         let server = TestServer::new(router).unwrap();
 
         // send request
@@ -153,5 +156,56 @@ mod tests {
         // assert
         response.assert_status_ok();
         response.assert_text("Machbarkeit Web API");
+    }
+
+    #[sqlx::test]
+    async fn auth_config_test(pool: SqlitePool) {
+        let (sender, _) = broadcast::channel(1);
+        let state = Arc::new(ApiContext {
+            db: pool,
+            base_url: "http://localhost".to_string(),
+            sender,
+        });
+        let config = AppConfig {
+            log_level: "debug".to_string(),
+            base_url: "http://localhost".to_string(),
+            auth: Some(Auth {
+                oidc: Some(Oidc {
+                    client_id: Some("test_client".to_string()),
+                    client_secret: Some("test_secret".to_string()),
+                    auth_endpoint: Some("http://localhost/dummy/auth".to_string()),
+                    token_endpoint: Some("http://localhost/dummy/token".to_string()),
+                    userinfo_endpoint: Some("http://localhost/dummy/userinfo".to_string()),
+                }),
+            }),
+            cors: Some(Cors {
+                allow_origin: Some("http://localhost:5443".to_string()),
+            }),
+        };
+
+        // test server
+        let router = build_router(state, &config).await.unwrap();
+        let server = TestServer::new(router).unwrap();
+
+        // send request
+        let req_url = "/feasibility/request";
+        let response = server.post(req_url).await;
+
+        // assert redirect to auth server
+        response.assert_status(StatusCode::TEMPORARY_REDIRECT);
+        response.assert_header(
+            "location",
+            format!(
+                "/login?next={}",
+                Encoded(config.base_url.to_owned() + req_url).to_string()
+            )
+            .to_string(),
+        );
+
+        // cors header is set
+        response.assert_header(
+            "access-control-allow-origin",
+            config.cors.unwrap().allow_origin.unwrap(),
+        );
     }
 }
