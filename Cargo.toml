@@ -14,7 +14,7 @@ axum = { version = "0.8.4", features = ["macros", "ws"] }
 config = "0.15.13"
 tower-http = { version = "0.6.6", features = ["trace", "cors"] }
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 anyhow = "1.0.98"
 tokio = { version = "1.46.1", features = ["full"] }
 tower-sessions = "0.14.0"
