@@ -2,13 +2,18 @@ FROM rust:1.87.0-alpine3.22 AS build
 
 RUN set -ex && \
     apk add --no-progress --no-cache \
-        musl-dev
+        musl-dev pkgconf openssl-dev openssl-libs-static make cmake g++
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock /app/
 COPY ./src /app/src
 COPY ./.sqlx /app/.sqlx
 COPY ./migrations /app/migrations
+
+COPY ./auth/Cargo.toml ./auth/Cargo.lock /app/auth/
+COPY ./auth/src /app/auth/src
+COPY ./auth/migrations /app/auth/migrations
+
 RUN cargo build --release
 
 FROM alpine:3.22 AS run
