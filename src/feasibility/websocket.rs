@@ -68,20 +68,10 @@ async fn ws_read(mut receiver: SplitStream<WebSocket>, state: Arc<ApiContext>) {
 mod tests {
     use super::*;
     use axum_test::TestServer;
-    use chrono::{DateTime, Utc};
     use http::StatusCode;
-    use serde_derive::Deserialize;
-    use serde_json::json;
     use sqlx::types::JsonValue;
     use sqlx::SqlitePool;
     use tokio::sync::broadcast;
-    use uuid::Uuid;
-
-    #[derive(Deserialize)]
-    struct Id {
-        id: Uuid,
-        date: DateTime<Utc>,
-    }
 
     #[sqlx::test]
     async fn websocket_read_test(pool: SqlitePool) {
@@ -113,32 +103,26 @@ mod tests {
         // send request
         let response = server.post("/feasibility/request").json(&query).await;
 
-        let accepted = response.json::<Id>();
-
         // set feasibility result
-        let msg = json!({
-            "id": accepted.id,
-            "status" : "completed",
-            "date": accepted.date,
-            "query": query,
-            "result_code" : 200,
-            "result_body" : "42",
-            "result_duration" : 600,
-        })
-        .to_string();
+        let mut updated = response.json::<api::FeasibilityRequest>();
+        updated.status = api::QueryState::Completed;
+        updated.result_code = Some(200);
+        updated.result_body = Some("42".to_string());
+        updated.result_duration = Some(600);
 
+        let msg = updated.clone();
         // send message through websocket
-        tokio::spawn(async move { websocket.send_text(&msg).await })
+        tokio::spawn(async move { websocket.send_json(&msg).await })
             .await
             .unwrap();
 
         // check result
         let response = server
-            .get(format!("/feasibility/request/{}", accepted.id).as_str())
+            .get(format!("/feasibility/request/{}", updated.id).as_str())
             .await;
 
         // assert
         response.assert_status(StatusCode::OK);
-        response.assert_text("42");
+        response.assert_text(&updated.result_body.unwrap());
     }
 }

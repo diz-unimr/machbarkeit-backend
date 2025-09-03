@@ -24,7 +24,7 @@ pub(crate) fn router() -> Router<Arc<ApiContext>> {
 #[derive(Clone, Debug, PartialEq, PartialOrd, sqlx::Type, Deserialize, Serialize)]
 #[sqlx(type_name = "status", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
-enum QueryState {
+pub(crate) enum QueryState {
     Pending,
     Completed,
 }
@@ -39,17 +39,17 @@ impl Into<String> for QueryState {
 }
 
 #[derive(Deserialize, Serialize, FromRow, Debug, PartialEq, Clone)]
-struct FeasibilityRequest {
-    id: Uuid,
+pub(crate) struct FeasibilityRequest {
+    pub(crate) id: Uuid,
     date: DateTime<Utc>,
     query: JsonValue,
-    status: QueryState,
+    pub(crate) status: QueryState,
     #[serde(skip_serializing_if = "Option::is_none")]
-    result_code: Option<u16>,
+    pub(crate) result_code: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    result_body: Option<String>,
+    pub(crate) result_body: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    result_duration: Option<u32>,
+    pub(crate) result_duration: Option<u32>,
 }
 
 #[debug_handler]
@@ -148,7 +148,6 @@ pub(crate) async fn store_result(
         r#"update requests set
            status = $1, result_code = $2, result_body = $3, result_duration = $4
            where id = $5"#,
-        // returning id as "id!:_",date as "date!:_" ,query as "query!:_",status as "status!:_",result,duration,error"#,
         request.status,
         request.result_code,
         request.result_body,
@@ -238,58 +237,5 @@ mod tests {
 
         // assert
         response.assert_status(StatusCode::SERVICE_UNAVAILABLE);
-    }
-
-    #[sqlx::test]
-    async fn websocket_read_test(pool: SqlitePool) {
-        let (sender, _) = broadcast::channel(1);
-        let state = Arc::new(ApiContext {
-            db: pool,
-            base_url: "http://localhost".to_string(),
-            sender,
-        });
-
-        // test server
-        let router = crate::feasibility::websocket::router()
-            .merge(router())
-            .with_state(state);
-        let server = TestServer::builder()
-            .http_transport()
-            .build(router)
-            .unwrap();
-
-        let mut websocket = server
-            .get_websocket(&"/feasibility/ws")
-            .await
-            .into_websocket()
-            .await;
-
-        // dummy request data
-        let query = JsonValue::Object(Default::default());
-
-        // send request
-        let response = server.post("/feasibility/request").json(&query).await;
-
-        // set feasibility result
-        let mut updated = response.json::<FeasibilityRequest>();
-        updated.status = QueryState::Completed;
-        updated.result_code = Some(200);
-        updated.result_body = Some("42".to_string());
-        updated.result_duration = Some(600);
-
-        let msg = updated.clone();
-        // send message through websocket
-        tokio::spawn(async move { websocket.send_json(&msg).await })
-            .await
-            .unwrap();
-
-        // check result
-        let response = server
-            .get(format!("/feasibility/request/{}", updated.id).as_str())
-            .await;
-
-        // assert
-        response.assert_status(StatusCode::OK);
-        response.assert_text(&updated.result_body.unwrap());
     }
 }
