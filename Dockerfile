@@ -32,6 +32,7 @@ RUN addgroup -g $GID $GROUP && \
 WORKDIR /app/
 COPY --from=build /app/target/release/machbarkeit-backend ./
 COPY ./app.yaml ./
+RUN chown -R $USER:$GROUP /app
 USER $USER
 EXPOSE 3000
 
