@@ -1,9 +1,11 @@
-use crate::config::{AppConfig, Cors};
+use crate::auth::auth_middleware;
+use crate::config::{AppConfig, Auth, Cors};
 use crate::feasibility::api;
 use crate::feasibility::websocket;
+use async_oidc_jwt_validator::{OidcConfig, OidcValidator};
 use auth::users::Backend;
-use axum::{routing::get, Router};
-use axum_login::{login_required, AuthManagerLayerBuilder};
+use axum::{middleware, routing::get, Router};
+use axum_login::AuthManagerLayerBuilder;
 use broadcast::Sender;
 use http::HeaderValue;
 use log::debug;
@@ -26,6 +28,7 @@ pub(crate) struct ApiContext {
     pub(crate) db: SqlitePool,
     pub(crate) base_url: String,
     pub(crate) sender: Sender<String>,
+    pub(crate) auth: Option<Auth>,
 }
 
 pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
@@ -47,6 +50,7 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
         db: db.clone(),
         base_url: config.base_url.clone(),
         sender,
+        auth: config.auth.clone(),
     });
 
     let router = build_router(state, &config)
@@ -65,7 +69,7 @@ async fn root() -> &'static str {
 async fn build_router(state: Arc<ApiContext>, config: &AppConfig) -> Result<Router, anyhow::Error> {
     let router = Router::new()
         .route("/", get(root))
-        .merge(build_api_router(config).await?)
+        .merge(build_api_router(state.clone(), config).await?)
         .merge(websocket::router())
         .with_state(state)
         .layer(TraceLayer::new_for_http())
@@ -84,7 +88,10 @@ fn build_cors_layer(config: Option<Cors>) -> Result<CorsLayer, anyhow::Error> {
     }
 }
 
-async fn build_api_router(config: &AppConfig) -> Result<Router<Arc<ApiContext>>, anyhow::Error> {
+async fn build_api_router(
+    state: Arc<ApiContext>,
+    config: &AppConfig,
+) -> Result<Router<Arc<ApiContext>>, anyhow::Error> {
     let router = api::router();
 
     // oidc auth
@@ -116,12 +123,26 @@ async fn build_api_router(config: &AppConfig) -> Result<Router<Arc<ApiContext>>,
                 config.base_url
             ))?);
 
+        // jwt validation config
+        let validation_config = OidcConfig::new(
+            "https://idp.diz.uni-marburg.de/auth/realms/Miracum".to_string(),
+            "machbarkeit".to_string(),
+            "https://idp.diz.uni-marburg.de/auth/realms/Miracum/protocol/openid-connect/certs"
+                .to_string(),
+        );
+        let validator = OidcValidator::new(validation_config);
         let db = SqlitePool::connect(":memory:").await?;
-        let backend = Backend::new(db, client, oidc_config.userinfo_endpoint.unwrap()).await;
+        let backend = Backend::new(
+            db,
+            client,
+            oidc_config.userinfo_endpoint.unwrap(),
+            validator,
+        )
+        .await;
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
         Ok(router
-            .route_layer(login_required!(Backend, login_url = "/login"))
+            .route_layer(middleware::from_fn_with_state(state, auth_middleware))
             .merge(crate::auth::router())
             .layer(auth_layer))
     } else {
@@ -144,6 +165,7 @@ mod tests {
             db: pool,
             base_url: "http://localhost".to_string(),
             sender,
+            auth: None,
         });
 
         // test server
@@ -165,6 +187,7 @@ mod tests {
             db: pool,
             base_url: "http://localhost".to_string(),
             sender,
+            auth: None,
         });
         let config = AppConfig {
             log_level: "debug".to_string(),

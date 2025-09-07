@@ -1,7 +1,8 @@
 use crate::server::ApiContext;
 use auth::oauth::{callback, CSRF_STATE_KEY, NEXT_URL_KEY};
-use auth::users::AuthSession;
-use axum::extract::Query;
+use auth::users::{AuthSession, BearerCreds, Credentials};
+use axum::extract::{Query, Request, State};
+use axum::middleware::Next;
 use axum::routing::post;
 use axum::{
     debug_handler, http::StatusCode,
@@ -9,9 +10,16 @@ use axum::{
     routing::get,
     Router,
 };
+use axum_extra::{
+    headers::{authorization::Bearer, Authorization},
+    TypedHeader,
+};
 use axum_login::tower_sessions::Session;
+use axum_login::AuthnBackend;
+use log::debug;
 use serde::Deserialize;
 use std::sync::Arc;
+use urlencoding::Encoded;
 
 // This allows us to extract the "next" field from the query string. We use this
 // to redirect after log in.
@@ -26,6 +34,44 @@ pub fn router() -> Router<Arc<ApiContext>> {
         .route("/login", get(login))
         .route("/logout", get(logout))
         .route("/oauth/callback", get(callback))
+}
+
+pub async fn auth_middleware(
+    State(state): State<Arc<ApiContext>>,
+    auth_session: AuthSession,
+    creds: Option<TypedHeader<Authorization<Bearer>>>,
+    request: Request,
+    next: Next,
+) -> impl IntoResponse {
+    match creds.clone() {
+        Some(c) => {
+            if state.auth.is_some() {
+                match auth_session
+                    .backend
+                    .authenticate(Credentials::Bearer(BearerCreds {
+                        token: c.token().to_string(),
+                    }))
+                    .await
+                {
+                    Ok(_) => next.run(request).await,
+                    Err(e) => (StatusCode::UNAUTHORIZED, e.to_string()).into_response(),
+                }
+            } else {
+                next.run(request).await
+            }
+        }
+        None => match auth_session.user {
+            None => {
+                let login_uri = request.uri().to_string();
+                debug!("request: {:#?}", request.uri().to_string());
+                Redirect::temporary(
+                    ("/login?next=".to_string() + &*Encoded(login_uri).to_string()).as_str(),
+                )
+            }
+            .into_response(),
+            Some(_) => next.run(request).await,
+        },
+    }
 }
 
 #[debug_handler]
@@ -55,7 +101,6 @@ async fn logout(
     Query(NextUrl { next }): Query<NextUrl>,
 ) -> impl IntoResponse {
     match auth_session.logout().await {
-        // Ok(_) => Redirect::to("/login").into_response(),
         Ok(_) => Redirect::to(next.unwrap_or("/".to_string()).as_str()).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }

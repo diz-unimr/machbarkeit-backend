@@ -174,6 +174,7 @@ mod tests {
             db: pool,
             base_url: "http://localhost".to_string(),
             sender,
+            auth: None,
         });
 
         // test server
@@ -220,6 +221,7 @@ mod tests {
             db: pool,
             base_url: "http://localhost".to_string(),
             sender,
+            auth: None,
         });
 
         // test server
