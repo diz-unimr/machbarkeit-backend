@@ -1,6 +1,8 @@
+use async_oidc_jwt_validator::OidcValidator;
 use axum::http::header::AUTHORIZATION;
 use axum_login::tracing::error;
 use axum_login::{AuthUser, AuthnBackend, UserId};
+use log::debug;
 use oauth2::{
     basic::{BasicClient, BasicRequestTokenError}, url::Url, AuthorizationCode, CsrfToken, EndpointNotSet, EndpointSet,
     Scope,
@@ -34,7 +36,18 @@ impl AuthUser for User {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Credentials {
+pub enum Credentials {
+    Bearer(BearerCreds),
+    OAuth(OAuthCreds),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BearerCreds {
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OAuthCreds {
     pub code: String,
     pub old_state: CsrfToken,
     pub new_state: CsrfToken,
@@ -54,6 +67,14 @@ pub struct User {
     pub access_token: String,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct Claims {
+    pub sub: String,
+    pub exp: usize,
+    pub iat: usize,
+    pub iss: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
     #[error(transparent)]
@@ -64,21 +85,30 @@ pub enum BackendError {
 
     #[error(transparent)]
     OAuth2(BasicRequestTokenError<<reqwest::Client as oauth2::AsyncHttpClient<'static>>::Error>),
+
+    #[error(transparent)]
+    JWT(jsonwebtoken::errors::Error),
 }
 
 pub type BasicClientSet =
     BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Backend {
     db: SqlitePool,
     client: BasicClientSet,
     http_client: reqwest::Client,
     userinfo_endpoint: String,
+    validator: OidcValidator,
 }
 
 impl Backend {
-    pub async fn new(db: SqlitePool, client: BasicClientSet, userinfo_endpoint: String) -> Self {
+    pub async fn new(
+        db: SqlitePool,
+        client: BasicClientSet,
+        userinfo_endpoint: String,
+        validator: OidcValidator,
+    ) -> Self {
         sqlx::migrate!()
             .run(&db)
             .await
@@ -94,6 +124,7 @@ impl Backend {
             client,
             http_client,
             userinfo_endpoint,
+            validator,
         }
     }
 
@@ -114,52 +145,71 @@ impl AuthnBackend for Backend {
         &self,
         creds: Self::Credentials,
     ) -> Result<Option<Self::User>, Self::Error> {
-        // ensure the CSRF state has not been tampered with
-        if creds.old_state.secret() != creds.new_state.secret() {
-            return Ok(None);
-        };
+        match creds {
+            Credentials::Bearer(bearer_creds) => {
+                match self
+                    .validator
+                    .validate::<Claims>(bearer_creds.token.as_str())
+                    .await
+                {
+                    Ok(claims) => {
+                        debug!("Valid token for sub: {}", claims.sub);
+                        Ok(None)
+                    }
+                    Err(e) => {
+                        error!("Bearer token validation failed: {}", e);
+                        Err(BackendError::JWT(e))
+                    }
+                }
+            }
+            Credentials::OAuth(oauth_creds) => {
+                // ensure the CSRF state has not been tampered with
+                if oauth_creds.old_state.secret() != oauth_creds.new_state.secret() {
+                    return Ok(None);
+                };
 
-        // process authorization code, expecting a token response back
-        let token_res = self
-            .client
-            .exchange_code(AuthorizationCode::new(creds.code))
-            .request_async(&self.http_client)
-            .await
-            .map_err(Self::Error::OAuth2)?;
+                // process authorization code, expecting a token response back
+                let access_token = self
+                    .client
+                    .exchange_code(AuthorizationCode::new(oauth_creds.code))
+                    .request_async(&self.http_client)
+                    .await
+                    .map_err(Self::Error::OAuth2)?
+                    .access_token()
+                    .secret()
+                    .to_string();
 
-        // use access token to request user info
-        let user_info = reqwest::Client::new()
-            .get(&self.userinfo_endpoint)
-            // .header(USER_AGENT.as_str(), "axum-login") // See: https://docs.github.com/en/rest/overview/resources-in-the-rest-api?apiVersion=2022-11-28#user-agent-required
-            .header(
-                AUTHORIZATION.as_str(),
-                format!("Bearer {}", token_res.access_token().secret()),
-            )
-            .send()
-            .await
-            .map_err(Self::Error::Reqwest)?
-            .json::<UserInfo>()
-            .await
-            .map_err(Self::Error::Reqwest)?;
+                // use access token to request user info
+                let user_info = reqwest::Client::new()
+                    .get(&self.userinfo_endpoint)
+                    .header(AUTHORIZATION.as_str(), format!("Bearer {}", access_token))
+                    .send()
+                    .await
+                    .map_err(Self::Error::Reqwest)?
+                    .json::<UserInfo>()
+                    .await
+                    .map_err(Self::Error::Reqwest)?;
 
-        // persist user in our database so we can use `get_user`
-        let user = sqlx::query_as(
-            r#"
-            insert into users (name, email, access_token)
-            values (?, ?, ?)
-            on conflict(email) do update
-            set access_token = excluded.access_token
-            returning *
-            "#,
-        )
-        .bind(user_info.name)
-        .bind(user_info.email)
-        .bind(token_res.access_token().secret())
-        .fetch_one(&self.db)
-        .await
-        .map_err(Self::Error::Sqlx)?;
+                // persist user in our database so we can use `get_user`
+                let user = sqlx::query_as(
+                    r#"
+                        insert into users (name, email, access_token)
+                        values (?, ?, ?)
+                        on conflict(email) do update
+                        set access_token = excluded.access_token
+                        returning *
+                        "#,
+                )
+                .bind(user_info.name)
+                .bind(user_info.email)
+                .bind(access_token)
+                .fetch_one(&self.db)
+                .await
+                .map_err(Self::Error::Sqlx)?;
 
-        Ok(Some(user))
+                Ok(Some(user))
+            }
+        }
     }
 
     async fn get_user(&self, user_id: &UserId<Self>) -> Result<Option<Self::User>, Self::Error> {

@@ -8,7 +8,7 @@ use oauth2::CsrfToken;
 use serde::Deserialize;
 
 pub const NEXT_URL_KEY: &str = "auth.next-url";
-use crate::users::{AuthSession, Credentials};
+use crate::users::{AuthSession, Credentials, OAuthCreds};
 
 pub const CSRF_STATE_KEY: &str = "oauth.csrf-state";
 
@@ -30,11 +30,11 @@ pub async fn callback(
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    let creds = Credentials {
+    let creds = Credentials::OAuth(OAuthCreds {
         code,
         old_state,
         new_state,
-    };
+    });
 
     let user = match auth_session.authenticate(creds).await {
         Ok(Some(user)) => user,
@@ -48,9 +48,7 @@ pub async fn callback(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    // todo
     if let Ok(Some(next)) = session.remove::<String>(NEXT_URL_KEY).await {
-        // Redirect::to(&next).into_response()
         Redirect::to(&next).into_response()
     } else {
         Redirect::to("/").into_response()
