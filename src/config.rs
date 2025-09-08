@@ -7,6 +7,7 @@ pub(crate) struct AppConfig {
     pub(crate) base_url: String,
     pub(crate) auth: Option<Auth>,
     pub(crate) cors: Option<Cors>,
+    pub(crate) mdr: Option<Mdr>,
 }
 
 #[derive(Default, Deserialize, Clone)]
@@ -26,6 +27,11 @@ pub(crate) struct Oidc {
 #[derive(Default, Deserialize, Clone)]
 pub(crate) struct Cors {
     pub(crate) allow_origin: Option<String>,
+}
+
+#[derive(Default, Deserialize, Clone)]
+pub(crate) struct Mdr {
+    pub(crate) endpoint: String,
 }
 
 impl AppConfig {

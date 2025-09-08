@@ -83,6 +83,7 @@ mod tests {
             base_url: "http://localhost".to_string(),
             sender,
             auth: None,
+            mdr_endpoint: None,
         });
 
         // test server
