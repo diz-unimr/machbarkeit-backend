@@ -9,3 +9,5 @@ base_url: http://localhost:3000
 #    userinfo_endpoint:
 #cors:
 #  allow_origin:
+#mdr:
+#  endpoint:

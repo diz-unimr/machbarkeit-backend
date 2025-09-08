@@ -6,6 +6,7 @@ use async_oidc_jwt_validator::{OidcConfig, OidcValidator};
 use auth::users::Backend;
 use axum::{middleware, routing::get, Router};
 use axum_login::AuthManagerLayerBuilder;
+use axum_reverse_proxy::ReverseProxy;
 use broadcast::Sender;
 use http::HeaderValue;
 use log::debug;
@@ -29,6 +30,7 @@ pub(crate) struct ApiContext {
     pub(crate) base_url: String,
     pub(crate) sender: Sender<String>,
     pub(crate) auth: Option<Auth>,
+    pub(crate) mdr_endpoint: Option<String>,
 }
 
 pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
@@ -51,6 +53,7 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
         base_url: config.base_url.clone(),
         sender,
         auth: config.auth.clone(),
+        mdr_endpoint: config.mdr.clone().map(|m| m.endpoint),
     });
 
     let router = build_router(state, &config)
@@ -91,7 +94,11 @@ async fn build_api_router(
     state: Arc<ApiContext>,
     config: &AppConfig,
 ) -> Result<Router<Arc<ApiContext>>, anyhow::Error> {
-    let router = api::router().merge(websocket::router());
+    let mut router = api::router().merge(websocket::router());
+
+    if let Some(mdr) = &state.mdr_endpoint {
+        router = router.merge(ReverseProxy::new("/mdr", mdr.as_str()));
+    }
 
     // oidc auth
     if let Some(oidc_config) = config.clone().auth.and_then(|auth| auth.oidc) {
@@ -165,6 +172,7 @@ mod tests {
             base_url: "http://localhost".to_string(),
             sender,
             auth: None,
+            mdr_endpoint: None,
         });
 
         // test server
@@ -187,6 +195,7 @@ mod tests {
             base_url: "http://localhost".to_string(),
             sender,
             auth: None,
+            mdr_endpoint: None,
         });
         let config = AppConfig {
             log_level: "debug".to_string(),
@@ -203,6 +212,7 @@ mod tests {
             cors: Some(Cors {
                 allow_origin: Some("http://localhost:5443".to_string()),
             }),
+            mdr: None,
         };
 
         // test server
