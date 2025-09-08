@@ -70,7 +70,6 @@ async fn build_router(state: Arc<ApiContext>, config: &AppConfig) -> Result<Rout
     let router = Router::new()
         .route("/", get(root))
         .merge(build_api_router(state.clone(), config).await?)
-        .merge(websocket::router())
         .with_state(state)
         .layer(TraceLayer::new_for_http())
         .layer(build_cors_layer(config.clone().cors)?);
@@ -92,7 +91,7 @@ async fn build_api_router(
     state: Arc<ApiContext>,
     config: &AppConfig,
 ) -> Result<Router<Arc<ApiContext>>, anyhow::Error> {
-    let router = api::router();
+    let router = api::router().merge(websocket::router());
 
     // oidc auth
     if let Some(oidc_config) = config.clone().auth.and_then(|auth| auth.oidc) {
