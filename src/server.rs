@@ -82,9 +82,11 @@ async fn build_router(state: Arc<ApiContext>, config: &AppConfig) -> Result<Rout
 
 fn build_cors_layer(config: Option<Cors>) -> Result<CorsLayer, anyhow::Error> {
     if let Some(origin) = config.and_then(|c| c.allow_origin) {
-        Ok(CorsLayer::new()
-            .allow_credentials(true)
-            .allow_origin(origin.parse::<HeaderValue>()?))
+        let o: Vec<HeaderValue> = origin
+            .split(",")
+            .map(|o| o.parse::<HeaderValue>().unwrap())
+            .collect();
+        Ok(CorsLayer::new().allow_credentials(true).allow_origin(o))
     } else {
         Ok(CorsLayer::default())
     }
