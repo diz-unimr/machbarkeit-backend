@@ -41,11 +41,13 @@ pub async fn callback(
         Ok(None) => {
             return StatusCode::UNAUTHORIZED.into_response();
         }
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
     };
 
-    if auth_session.login(&user).await.is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    if let Err(e) = auth_session.login(&user).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
 
     if let Ok(Some(next)) = session.remove::<String>(NEXT_URL_KEY).await {
