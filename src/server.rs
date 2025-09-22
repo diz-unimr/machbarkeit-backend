@@ -93,7 +93,6 @@ fn build_cors_layer(config: Option<Cors>) -> Result<CorsLayer, anyhow::Error> {
             .allow_credentials(true)
             .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
             .allow_origin(origins)
-            // .allow_origin(origin.parse::<HeaderValue>()?)
             .allow_headers([AUTHORIZATION, CONTENT_TYPE]))
     } else {
         Ok(CorsLayer::default())
@@ -158,7 +157,7 @@ async fn build_api_router(
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
         Ok(router
-            .route_layer(middleware::from_fn_with_state(state, auth_middleware))
+            .layer(middleware::from_fn_with_state(state, auth_middleware))
             .merge(crate::auth::router())
             .layer(auth_layer))
     } else {
