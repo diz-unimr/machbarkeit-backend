@@ -80,19 +80,25 @@ async fn login(
     session: Session,
     Query(NextUrl { next }): Query<NextUrl>,
 ) -> impl IntoResponse {
-    let (auth_url, csrf_state) = auth_session.backend.authorize_url();
+    // check already logged in
+    match auth_session.user {
+        Some(_) => StatusCode::OK.into_response(),
+        None => {
+            let (auth_url, csrf_state) = auth_session.backend.authorize_url();
 
-    session
-        .insert(CSRF_STATE_KEY, csrf_state.secret())
-        .await
-        .expect("Serialization should not fail.");
+            session
+                .insert(CSRF_STATE_KEY, csrf_state.secret())
+                .await
+                .expect("Serialization should not fail.");
 
-    session
-        .insert(NEXT_URL_KEY, next)
-        .await
-        .expect("Serialization should not fail.");
+            session
+                .insert(NEXT_URL_KEY, next)
+                .await
+                .expect("Serialization should not fail.");
 
-    Redirect::to(auth_url.as_str()).into_response()
+            Redirect::to(auth_url.as_str()).into_response()
+        }
+    }
 }
 
 #[debug_handler]
