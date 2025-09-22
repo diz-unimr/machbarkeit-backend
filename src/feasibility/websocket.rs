@@ -114,9 +114,7 @@ mod tests {
 
         let msg = updated.clone();
         // send message through websocket
-        tokio::spawn(async move { websocket.send_json(&msg).await })
-            .await
-            .unwrap();
+        websocket.send_json(&msg).await;
 
         // check result
         let response = server
