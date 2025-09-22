@@ -8,6 +8,8 @@ use axum::{middleware, routing::get, Router};
 use axum_login::AuthManagerLayerBuilder;
 use axum_reverse_proxy::ReverseProxy;
 use broadcast::Sender;
+use http::header::{AUTHORIZATION, CONTENT_TYPE};
+use http::method::Method;
 use http::HeaderValue;
 use log::debug;
 use oauth2::basic::BasicClient;
@@ -74,19 +76,25 @@ async fn build_router(state: Arc<ApiContext>, config: &AppConfig) -> Result<Rout
         .route("/", get(root))
         .merge(build_api_router(state.clone(), config).await?)
         .with_state(state)
-        .layer(TraceLayer::new_for_http())
-        .layer(build_cors_layer(config.clone().cors)?);
+        .layer(build_cors_layer(config.clone().cors)?)
+        .layer(TraceLayer::new_for_http());
 
     Ok(router)
 }
 
 fn build_cors_layer(config: Option<Cors>) -> Result<CorsLayer, anyhow::Error> {
     if let Some(origin) = config.and_then(|c| c.allow_origin) {
-        let o: Vec<HeaderValue> = origin
+        let origins = origin
             .split(",")
             .map(|o| o.parse::<HeaderValue>().unwrap())
-            .collect();
-        Ok(CorsLayer::new().allow_credentials(true).allow_origin(o))
+            .collect::<Vec<HeaderValue>>();
+
+        Ok(CorsLayer::new()
+            .allow_credentials(true)
+            .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+            .allow_origin(origins)
+            // .allow_origin(origin.parse::<HeaderValue>()?)
+            .allow_headers([AUTHORIZATION, CONTENT_TYPE]))
     } else {
         Ok(CorsLayer::default())
     }
@@ -163,6 +171,7 @@ mod tests {
     use super::*;
     use crate::config::{Auth, Oidc};
     use axum_test::TestServer;
+    use http::header::ORIGIN;
     use http::StatusCode;
     use urlencoding::Encoded;
 
@@ -223,7 +232,11 @@ mod tests {
 
         // send request
         let req_url = "/feasibility/request";
-        let response = server.post(req_url).await;
+        let response = server
+            .post(req_url)
+            // send origin
+            .add_header(ORIGIN, config.cors.clone().unwrap().allow_origin.unwrap())
+            .await;
 
         // assert redirect to auth server
         response.assert_status(StatusCode::TEMPORARY_REDIRECT);
