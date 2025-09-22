@@ -2,6 +2,10 @@ name: build & test
 
 "on":
   push:
+    branches:
+      - main
+    tags:
+      - "**"
   pull_request:
 
 permissions: read-all
