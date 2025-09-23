@@ -2,3 +2,4 @@
 /auth/target
 .idea
 db.sqlite
+/deploy
