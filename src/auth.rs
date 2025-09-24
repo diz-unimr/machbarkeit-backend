@@ -16,7 +16,6 @@ use axum_extra::{
 };
 use axum_login::tower_sessions::Session;
 use axum_login::AuthnBackend;
-use log::debug;
 use serde::Deserialize;
 use std::sync::Arc;
 use urlencoding::Encoded;
@@ -63,12 +62,12 @@ pub async fn auth_middleware(
         None => match auth_session.user {
             None => {
                 let login_uri = request.uri().to_string();
-                debug!("request: {:#?}", request.uri().to_string());
+
                 Redirect::temporary(
                     ("/login?next=".to_string() + &*Encoded(login_uri).to_string()).as_str(),
                 )
+                .into_response()
             }
-            .into_response(),
             Some(_) => next.run(request).await,
         },
     }

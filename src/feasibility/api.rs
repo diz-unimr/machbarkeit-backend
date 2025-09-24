@@ -5,9 +5,11 @@ use http::{header, StatusCode};
 use crate::error::ApiError;
 use crate::server::ApiContext;
 use anyhow::anyhow;
+use auth::users::AuthSession;
 use axum::extract::ws::Utf8Bytes;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
+use axum_login::AuthUser;
 use chrono::{DateTime, Utc};
 use http::header::LOCATION;
 use serde_derive::{Deserialize, Serialize};
@@ -50,11 +52,14 @@ pub(crate) struct FeasibilityRequest {
     pub(crate) result_body: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) result_duration: Option<u32>,
+    #[serde(skip)]
+    user_id: Option<i64>,
 }
 
 #[debug_handler]
 async fn create(
     State(ctx): State<Arc<ApiContext>>,
+    auth_session: AuthSession,
     Json(query): Json<JsonValue>,
 ) -> Result<impl IntoResponse, ApiError> {
     if ctx.sender.receiver_count() < 1 {
@@ -72,13 +77,14 @@ async fn create(
         result_code: None,
         result_body: None,
         result_duration: None,
+        user_id: auth_session.user.map(|u| u.id()),
     };
 
     let result: FeasibilityRequest = sqlx::query_as!(
         FeasibilityRequest,
-        r#"insert into requests (id,date,query,status,result_code,result_body,result_duration) values ($1,$2,$3,$4,$5,$6,$7)
+        r#"insert into requests (id,date,query,status,result_code,result_body,result_duration,user_id) values ($1,$2,$3,$4,$5,$6,$7,$8)
            returning id as "id!:_",date as "date!:_" ,query as "query!:_",
-                     status as "status!:_", result_code as "result_code:_",result_body,result_duration as "result_duration:_""#,
+                     status as "status!:_", result_code as "result_code:_",result_body,result_duration as "result_duration:_", user_id"#,
         request.id,
         request.date,
         request.query,
@@ -86,6 +92,7 @@ async fn create(
         request.result_code,
         request.result_body,
         request.result_duration,
+        request.user_id
     )
     .fetch_one(&ctx.db)
     .await?;
@@ -111,7 +118,7 @@ async fn read(
 ) -> Result<impl IntoResponse, ApiError> {
     let result:Option<FeasibilityRequest> = sqlx::query_as!(
         FeasibilityRequest,
-        r#"select id as "id!:_",date as "date!:_" ,query as "query!:_",status as "status!:_",result_code as "result_code:_",result_body,result_duration as "result_duration:_"
+        r#"select id as "id!:_",date as "date!:_" ,query as "query!:_",status as "status!:_",result_code as "result_code:_",result_body,result_duration as "result_duration:_", user_id
         from requests where id = $1"#,
         id
     )

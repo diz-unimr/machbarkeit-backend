@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "insert into requests (id,date,query,status,result_code,result_body,result_duration) values ($1,$2,$3,$4,$5,$6,$7)\n           returning id as \"id!:_\",date as \"date!:_\" ,query as \"query!:_\",\n                     status as \"status!:_\", result_code as \"result_code:_\",result_body,result_duration as \"result_duration:_\"",
+  "query": "select id as \"id!:_\",date as \"date!:_\" ,query as \"query!:_\",status as \"status!:_\",result_code as \"result_code:_\",result_body,result_duration as \"result_duration:_\", user_id\n        from requests where id = $1",
   "describe": {
     "columns": [
       {
@@ -37,20 +37,26 @@
         "name": "result_duration:_",
         "ordinal": 6,
         "type_info": "Integer"
+      },
+      {
+        "name": "user_id",
+        "ordinal": 7,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
-      "Right": 7
+      "Right": 1
     },
     "nullable": [
+      true,
       false,
       false,
       false,
-      false,
+      true,
       true,
       true,
       true
     ]
   },
-  "hash": "522fc93bad2587af0d88e54d996f42c83030950fcdb93f9b8e2b5b64ae7f5b43"
+  "hash": "a7de5ac525370108a608e7f8e561f77dc092d4d5d160804687e2f870a271c9d7"
 }

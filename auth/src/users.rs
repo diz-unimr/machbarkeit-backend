@@ -109,11 +109,6 @@ impl Backend {
         userinfo_endpoint: String,
         validator: OidcValidator,
     ) -> Self {
-        sqlx::migrate!()
-            .run(&db)
-            .await
-            .expect("Db migration should complete");
-
         let http_client: reqwest::Client = reqwest::ClientBuilder::new()
             // following redirects opens the client up to SSRF vulnerabilities
             .redirect(reqwest::redirect::Policy::none())

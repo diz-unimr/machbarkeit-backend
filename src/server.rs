@@ -14,7 +14,6 @@ use http::HeaderValue;
 use log::debug;
 use oauth2::basic::BasicClient;
 use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
-use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -147,16 +146,9 @@ async fn build_api_router(
                 .to_string(),
         );
         let validator = OidcValidator::new(validation_config);
-        let db = SqlitePoolOptions::new()
-            .min_connections(1)
-            .max_connections(1)
-            .idle_timeout(None)
-            .max_lifetime(None)
-            .connect("sqlite::memory:")
-            .await?;
 
         let backend = Backend::new(
-            db,
+            state.db.clone(),
             client,
             oidc_config.userinfo_endpoint.unwrap(),
             validator,
