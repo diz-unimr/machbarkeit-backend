@@ -22,6 +22,7 @@ pub(crate) struct Oidc {
     pub(crate) auth_endpoint: Option<String>,
     pub(crate) token_endpoint: Option<String>,
     pub(crate) userinfo_endpoint: Option<String>,
+    pub(crate) session_lifetime: Option<i64>,
 }
 
 #[derive(Default, Deserialize, Clone)]

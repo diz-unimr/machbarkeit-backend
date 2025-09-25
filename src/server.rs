@@ -115,7 +115,10 @@ async fn build_api_router(
         let session_layer = SessionManagerLayer::new(session_store)
             .with_secure(false)
             .with_same_site(SameSite::Lax)
-            .with_expiry(Expiry::OnInactivity(Duration::seconds(120)));
+            // default session lifetime is 15 days
+            .with_expiry(Expiry::OnInactivity(Duration::seconds(
+                oidc_config.session_lifetime.unwrap_or(86400),
+            )));
 
         let client_id = oidc_config
             .client_id
@@ -217,6 +220,7 @@ mod tests {
                     auth_endpoint: Some("http://localhost/dummy/auth".to_string()),
                     token_endpoint: Some("http://localhost/dummy/token".to_string()),
                     userinfo_endpoint: Some("http://localhost/dummy/userinfo".to_string()),
+                    session_lifetime: Some(120),
                 }),
             }),
             cors: Some(Cors {
