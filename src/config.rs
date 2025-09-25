@@ -8,6 +8,13 @@ pub(crate) struct AppConfig {
     pub(crate) auth: Option<Auth>,
     pub(crate) cors: Option<Cors>,
     pub(crate) mdr: Option<Mdr>,
+    pub(crate) session: Session,
+}
+
+#[derive(Default, Deserialize, Clone)]
+pub(crate) struct Session {
+    pub(crate) lifetime: i64,
+    pub(crate) cross_domain: bool,
 }
 
 #[derive(Default, Deserialize, Clone)]
@@ -22,7 +29,6 @@ pub(crate) struct Oidc {
     pub(crate) auth_endpoint: Option<String>,
     pub(crate) token_endpoint: Option<String>,
     pub(crate) userinfo_endpoint: Option<String>,
-    pub(crate) session_lifetime: Option<i64>,
 }
 
 #[derive(Default, Deserialize, Clone)]

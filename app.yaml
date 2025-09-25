@@ -7,8 +7,10 @@ base_url: http://localhost:3000
 #    auth_endpoint:
 #    token_endpoint:
 #    userinfo_endpoint:
-#    session_lifetime:
 #cors:
 #  allow_origin:
+session:
+  lifetime: 86400 # 15 days
+  cross_domain: false
 #mdr:
 #  endpoint:

@@ -113,11 +113,14 @@ async fn build_api_router(
     if let Some(oidc_config) = config.clone().auth.and_then(|auth| auth.oidc) {
         let session_store = MemoryStore::default();
         let session_layer = SessionManagerLayer::new(session_store)
-            .with_secure(false)
-            .with_same_site(SameSite::Lax)
-            // default session lifetime is 15 days
+            .with_secure(config.session.cross_domain)
+            .with_same_site(if config.session.cross_domain {
+                SameSite::None
+            } else {
+                SameSite::Lax
+            })
             .with_expiry(Expiry::OnInactivity(Duration::seconds(
-                oidc_config.session_lifetime.unwrap_or(86400),
+                config.session.lifetime,
             )));
 
         let client_id = oidc_config
@@ -171,7 +174,7 @@ async fn build_api_router(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Auth, Oidc};
+    use crate::config::{Auth, Oidc, Session};
     use axum_test::TestServer;
     use http::header::ORIGIN;
     use http::StatusCode;
@@ -220,13 +223,16 @@ mod tests {
                     auth_endpoint: Some("http://localhost/dummy/auth".to_string()),
                     token_endpoint: Some("http://localhost/dummy/token".to_string()),
                     userinfo_endpoint: Some("http://localhost/dummy/userinfo".to_string()),
-                    session_lifetime: Some(120),
                 }),
             }),
             cors: Some(Cors {
                 allow_origin: Some("http://localhost:5443".to_string()),
             }),
             mdr: None,
+            session: Session {
+                lifetime: 120,
+                cross_domain: false,
+            },
         };
 
         // test server
