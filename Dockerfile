@@ -12,7 +12,6 @@ COPY ./migrations /app/migrations
 
 COPY ./auth/Cargo.toml ./auth/Cargo.lock /app/auth/
 COPY ./auth/src /app/auth/src
-COPY ./auth/migrations /app/auth/migrations
 
 RUN cargo build --release
 

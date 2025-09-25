@@ -59,7 +59,7 @@ pub(crate) struct FeasibilityRequest {
 #[debug_handler]
 async fn create(
     State(ctx): State<Arc<ApiContext>>,
-    auth_session: AuthSession,
+    auth_session: Result<AuthSession, (StatusCode, &'static str)>,
     Json(query): Json<JsonValue>,
 ) -> Result<impl IntoResponse, ApiError> {
     if ctx.sender.receiver_count() < 1 {
@@ -77,7 +77,7 @@ async fn create(
         result_code: None,
         result_body: None,
         result_duration: None,
-        user_id: auth_session.user.map(|u| u.id()),
+        user_id: auth_session.ok().map(|a| a.user.map(|u| u.id())).flatten(),
     };
 
     let result: FeasibilityRequest = sqlx::query_as!(
@@ -247,6 +247,7 @@ mod tests {
             .await;
 
         // assert
+        println!("{:?}", response.text());
         response.assert_status(StatusCode::SERVICE_UNAVAILABLE);
     }
 }
