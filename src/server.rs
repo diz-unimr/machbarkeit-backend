@@ -8,7 +8,7 @@ use axum::{middleware, routing::get, Router};
 use axum_login::AuthManagerLayerBuilder;
 use axum_reverse_proxy::ReverseProxy;
 use broadcast::Sender;
-use http::header::{AUTHORIZATION, CONTENT_TYPE};
+use http::header::{AUTHORIZATION, CONTENT_TYPE, LOCATION};
 use http::method::Method;
 use http::HeaderValue;
 use log::debug;
@@ -93,7 +93,7 @@ fn build_cors_layer(config: Option<Cors>) -> Result<CorsLayer, anyhow::Error> {
             .allow_credentials(true)
             .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
             .allow_origin(origins)
-            .allow_headers([AUTHORIZATION, CONTENT_TYPE]))
+            .allow_headers([AUTHORIZATION, CONTENT_TYPE, LOCATION]))
     } else {
         Ok(CorsLayer::default())
     }
