@@ -93,7 +93,8 @@ fn build_cors_layer(config: Option<Cors>) -> Result<CorsLayer, anyhow::Error> {
             .allow_credentials(true)
             .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
             .allow_origin(origins)
-            .allow_headers([AUTHORIZATION, CONTENT_TYPE, LOCATION]))
+            .expose_headers([LOCATION])
+            .allow_headers([AUTHORIZATION, CONTENT_TYPE]))
     } else {
         Ok(CorsLayer::default())
     }
