@@ -4,7 +4,8 @@ use crate::feasibility::api;
 use crate::feasibility::websocket;
 use async_oidc_jwt_validator::{OidcConfig, OidcValidator};
 use auth::users::Backend;
-use axum::{middleware, routing::get, Router};
+use axum::routing::get;
+use axum::{middleware, Router};
 use axum_login::AuthManagerLayerBuilder;
 use axum_reverse_proxy::ReverseProxy;
 use broadcast::Sender;
@@ -25,6 +26,9 @@ use tower_sessions::{
 };
 use tracing::log;
 use tracing_subscriber::EnvFilter;
+use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+use utoipa::{openapi, Modify, OpenApi};
+use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(Clone)]
 pub(crate) struct ApiContext {
@@ -67,6 +71,45 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
     axum::serve(listener, router).await.map_err(|e| e.into())
 }
 
+#[derive(OpenApi)]
+#[openapi(
+    modifiers(&SecurityAddon),
+    security(
+         ("Access token" = []),
+    ),
+    paths(root, api::read, api::create)
+)]
+struct ApiDoc;
+
+struct SecurityAddon;
+
+impl Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut openapi::OpenApi) {
+        openapi.components = Some(
+            openapi::ComponentsBuilder::new()
+                .security_scheme(
+                    "Access token",
+                    SecurityScheme::Http(
+                        HttpBuilder::new()
+                            .scheme(HttpAuthScheme::Bearer)
+                            .bearer_format("JWT")
+                            .build(),
+                    ),
+                )
+                .build(),
+        )
+    }
+}
+
+/// API metadata
+#[utoipa::path(
+    get,
+    path = "/",
+    responses(
+        (status = 200, description = "Machbarkeit Web API", body = str),
+    ),
+    tag = "metadata"
+)]
 async fn root() -> &'static str {
     "Machbarkeit Web API"
 }
@@ -74,6 +117,15 @@ async fn root() -> &'static str {
 async fn build_router(state: Arc<ApiContext>, config: &AppConfig) -> Result<Router, anyhow::Error> {
     let router = Router::new()
         .route("/", get(root))
+        .merge(
+            SwaggerUi::new("/swagger-ui")
+                .url("/api-docs/openapi.json", ApiDoc::openapi())
+                .config(
+                    utoipa_swagger_ui::Config::default()
+                        .try_it_out_enabled(true)
+                        .filter(false),
+                ),
+        )
         .merge(build_api_router(state.clone(), config).await?)
         .with_state(state)
         .layer(build_cors_layer(config.clone().cors)?)

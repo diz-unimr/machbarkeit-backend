@@ -16,6 +16,7 @@ use serde_derive::{Deserialize, Serialize};
 use sqlx::types::{JsonValue, Uuid};
 use sqlx::FromRow;
 use std::sync::Arc;
+use utoipa::ToSchema;
 
 pub(crate) fn router() -> Router<Arc<ApiContext>> {
     Router::new()
@@ -23,7 +24,7 @@ pub(crate) fn router() -> Router<Arc<ApiContext>> {
         .route("/feasibility/request/{id}", get(read))
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, sqlx::Type, Deserialize, Serialize)]
+#[derive(ToSchema, Clone, Debug, PartialEq, PartialOrd, sqlx::Type, Deserialize, Serialize)]
 #[sqlx(type_name = "status", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum QueryState {
@@ -40,7 +41,7 @@ impl Into<String> for QueryState {
     }
 }
 
-#[derive(Deserialize, Serialize, FromRow, Debug, PartialEq, Clone)]
+#[derive(ToSchema, Deserialize, Serialize, FromRow, Debug, PartialEq, Clone)]
 pub(crate) struct FeasibilityRequest {
     pub(crate) id: Uuid,
     date: DateTime<Utc>,
@@ -56,8 +57,29 @@ pub(crate) struct FeasibilityRequest {
     user_id: Option<i64>,
 }
 
+/// Create a Feasibility request
+#[utoipa::path(
+    post,
+    path = "/feasibility/request",
+    request_body(content = JsonValue, content_type = "application/sq+json"),
+    responses(
+        (
+            status = 203,
+            description = "Request accepted. See Location header for result",
+            headers(
+                ("Location" = String, description = "Result endpoint for the request")
+            ),
+            body = FeasibilityRequest,
+        ),
+        (
+            status = 503, description = "No feasibility service subscribed to execute the query",
+            body = String
+        )
+    ),
+    tag = "feasibility"
+)]
 #[debug_handler]
-async fn create(
+pub(crate) async fn create(
     State(ctx): State<Arc<ApiContext>>,
     auth_session: Result<AuthSession, (StatusCode, &'static str)>,
     Json(query): Json<JsonValue>,
@@ -94,8 +116,8 @@ async fn create(
         request.result_duration,
         request.user_id
     )
-    .fetch_one(&ctx.db)
-    .await?;
+        .fetch_one(&ctx.db)
+        .await?;
 
     // broadcast request
     let msg = serde_json::to_string(&request)?;
@@ -111,12 +133,25 @@ async fn create(
     ))
 }
 
+/// Get a Feasibility result by id
+#[utoipa::path(
+    get,
+    path = "/feasibility/request/{id}",
+    responses(
+        (status = 200, description = "Ok", body = FeasibilityRequest),
+        (status = 404, description = "Not Found. Result is not available yet", body = ()),
+        (status = 503, description = "Service Unavailable", body = String),
+        (status = 504, description = "Gateway Timeout", body = String),
+        (status = 500, description = "Internal Server Error", body = String)
+    ),
+    tag = "feasibility"
+)]
 #[debug_handler]
-async fn read(
+pub(crate) async fn read(
     State(ctx): State<Arc<ApiContext>>,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let result:Option<FeasibilityRequest> = sqlx::query_as!(
+    let result: Option<FeasibilityRequest> = sqlx::query_as!(
         FeasibilityRequest,
         r#"select id as "id!:_",date as "date!:_" ,query as "query!:_",status as "status!:_",result_code as "result_code:_",result_body,result_duration as "result_duration:_", user_id
         from requests where id = $1"#,
