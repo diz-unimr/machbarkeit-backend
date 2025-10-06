@@ -4,9 +4,7 @@ base_url: http://localhost:3000
 #  oidc:
 #    client_id:
 #    client_secret:
-#    auth_endpoint:
-#    token_endpoint:
-#    userinfo_endpoint:
+#    issuer_url:
 #cors:
 #  allow_origin:
 session:
