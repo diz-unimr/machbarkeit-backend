@@ -42,7 +42,7 @@ pub(crate) struct ApiContext {
 
 pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
     let filter = format!(
-        "{}={level},tower_http={level}",
+        "{}={level},auth={level},tower_http={level}",
         env!("CARGO_CRATE_NAME"),
         level = config.log_level
     );

@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use log::debug;
 use serde_derive::Deserialize;
 
 #[derive(Deserialize)]
@@ -20,7 +21,7 @@ impl DiscoveryDocument {
 async fn discover(issuer_url: &str) -> Result<DiscoveryDocument, anyhow::Error> {
     let discovery_url = format!("{}/.well-known/openid-configuration", issuer_url);
 
-    log::debug!("Fetching OpenID Connect discovery from: {}", discovery_url);
+    debug!("Fetching OpenID Connect discovery from: {}", discovery_url);
 
     let response = reqwest::get(&discovery_url)
         .await
