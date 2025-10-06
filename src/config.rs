@@ -24,11 +24,9 @@ pub(crate) struct Auth {
 
 #[derive(Default, Deserialize, Clone)]
 pub(crate) struct Oidc {
-    pub(crate) client_id: Option<String>,
-    pub(crate) client_secret: Option<String>,
-    pub(crate) auth_endpoint: Option<String>,
-    pub(crate) token_endpoint: Option<String>,
-    pub(crate) userinfo_endpoint: Option<String>,
+    pub(crate) client_id: String,
+    pub(crate) client_secret: String,
+    pub(crate) issuer_url: String,
 }
 
 #[derive(Default, Deserialize, Clone)]

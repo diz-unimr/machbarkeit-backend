@@ -3,6 +3,7 @@ use crate::config::{AppConfig, Auth, Cors};
 use crate::feasibility::api;
 use crate::feasibility::websocket;
 use async_oidc_jwt_validator::{OidcConfig, OidcValidator};
+use auth::oidc::DiscoveryDocument;
 use auth::users::Backend;
 use axum::routing::get;
 use axum::{middleware, Router};
@@ -176,17 +177,12 @@ async fn build_api_router(
                 config.session.lifetime,
             )));
 
-        let client_id = oidc_config
-            .client_id
-            .map(ClientId::new)
-            .expect("CLIENT_ID should be provided.");
-        let client_secret = oidc_config
-            .client_secret
-            .map(ClientSecret::new)
-            .expect("CLIENT_SECRET should be provided.");
+        let client_id = ClientId::new(oidc_config.client_id.clone());
+        let client_secret = ClientSecret::new(oidc_config.client_secret);
+        let discovery: DiscoveryDocument = DiscoveryDocument::new(&oidc_config.issuer_url).await?;
 
-        let auth_url = AuthUrl::new(oidc_config.auth_endpoint.unwrap())?;
-        let token_url = TokenUrl::new(oidc_config.token_endpoint.unwrap())?;
+        let auth_url = AuthUrl::new(discovery.authorization_endpoint)?;
+        let token_url = TokenUrl::new(discovery.token_endpoint)?;
 
         let client = BasicClient::new(client_id)
             .set_client_secret(client_secret)
@@ -199,17 +195,16 @@ async fn build_api_router(
 
         // jwt validation config
         let validation_config = OidcConfig::new(
-            "https://idp.diz.uni-marburg.de/auth/realms/Miracum".to_string(),
-            "machbarkeit".to_string(),
-            "https://idp.diz.uni-marburg.de/auth/realms/Miracum/protocol/openid-connect/certs"
-                .to_string(),
+            oidc_config.issuer_url,
+            oidc_config.client_id,
+            discovery.jwks_uri,
         );
         let validator = OidcValidator::new(validation_config);
 
         let backend = Backend::new(
             state.db.clone(),
             client,
-            oidc_config.userinfo_endpoint.unwrap(),
+            discovery.userinfo_endpoint,
             validator,
         )
         .await;
@@ -231,6 +226,9 @@ mod tests {
     use axum_test::TestServer;
     use http::header::ORIGIN;
     use http::StatusCode;
+    use httpmock::Method::GET;
+    use httpmock::MockServer;
+    use serde_json::json;
     use urlencoding::Encoded;
 
     #[sqlx::test]
@@ -266,16 +264,19 @@ mod tests {
             auth: None,
             mdr_endpoint: None,
         });
+
+        // mock server for the oidc discovery
+        let idp = MockServer::start();
+
+        // config
         let config = AppConfig {
             log_level: "debug".to_string(),
             base_url: "http://localhost".to_string(),
             auth: Some(Auth {
                 oidc: Some(Oidc {
-                    client_id: Some("test_client".to_string()),
-                    client_secret: Some("test_secret".to_string()),
-                    auth_endpoint: Some("http://localhost/dummy/auth".to_string()),
-                    token_endpoint: Some("http://localhost/dummy/token".to_string()),
-                    userinfo_endpoint: Some("http://localhost/dummy/userinfo".to_string()),
+                    client_id: "test_client".to_string(),
+                    client_secret: "test_secret".to_string(),
+                    issuer_url: idp.base_url(),
                 }),
             }),
             cors: Some(Cors {
@@ -288,6 +289,21 @@ mod tests {
             },
         };
 
+        // discovery endpoint mock
+        let discovery_mock = idp.mock(|when, then| {
+            when.method(GET).path("/.well-known/openid-configuration");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({
+                    "issuer": idp.base_url(),
+                    "authorization_endpoint": format!("{}/auth", idp.base_url()),
+                    "token_endpoint": format!("{}/token", idp.base_url()),
+                    "introspection_endpoint": format!("{}/introspect", idp.base_url()),
+                    "userinfo_endpoint": format!("{}/userinfo", idp.base_url()),
+                    "jwks_uri": format!("{}/certs", idp.base_url()),
+                }));
+        });
+
         // test server
         let router = build_router(state, &config).await.unwrap();
         let server = TestServer::new(router).unwrap();
@@ -299,6 +315,9 @@ mod tests {
             // send origin
             .add_header(ORIGIN, config.cors.clone().unwrap().allow_origin.unwrap())
             .await;
+
+        // assert oidc discovery
+        discovery_mock.assert();
 
         // assert redirect to auth server
         response.assert_status(StatusCode::TEMPORARY_REDIRECT);
