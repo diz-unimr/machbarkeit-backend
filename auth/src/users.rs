@@ -153,7 +153,6 @@ impl AuthnBackend for Backend {
                     }
                     Err(e) => {
                         error!("Bearer token validation failed: {}", e);
-                        debug!("Bearer token validation failed: {}", e);
                         Err(BackendError::JWT(e))
                     }
                 }
