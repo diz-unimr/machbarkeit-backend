@@ -14,7 +14,7 @@ app in order to provide:
 - Ontology data via the MDR service (configured)
 - (Asynchronous) Feasibility request execution
 
-## Ontology
+# Ontology
 
 Ontology data is proxied through the MDR service (see API)
 
