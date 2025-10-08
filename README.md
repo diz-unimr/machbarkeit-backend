@@ -8,6 +8,46 @@
 
 > Backend service for the Machbarkeit Web App
 
+This service implements the Backend for frontend (BFF) pattern. It serves as dedicated backend for the Machbarkeit Web
+app in order to provide:
+
+- Ontology data via the MDR service (configured)
+- (Asynchronous) Feasibility request execution
+
+## Ontology
+
+Ontology data is proxied through the MDR service (see API)
+
+# Feasibility requests
+
+Feasibility request handling is done asynchronously.<br/>
+Clients can send feasibility requests via the API endpoint `/feasibility/request` (see API below). If accepted (202),
+the backend provides the result url in the `Location`-Header of the response.
+
+This url can then be polled for the feasibility result which will return a 404 response if the result is not yet
+available (poll again!) or the actual result otherwise.
+
+## Broker scenario
+
+This supports request execution against data repositories in protected networks that are not directly accessible from
+the backend.<br />
+In this scenario the backend serves as a broker that delegates incoming requests from the frontend. A request execution
+service (see [machbarkeit-query](https://github.com/diz-unimr/machbarkeit-query)) connected via websocket can execute
+the request against a data repository and send the feasibility result back to the broker (i.e. the backend).
+The persisted request is then updated with the result data and can be obtained by the frontend with a request to
+`/feasibility/request/{id}`.
+
+**Example deployment:**
+
+![machbarkeit broker / query scenario](img/machbarkeit_architecture_sm.drawio.png)
+
+## Format
+
+Feasibility requests are represented in the
+[structured query](https://github.com/num-codex/codex-structured-query/blob/main/structured-query/documentation/2021_01_29StructeredQueriesDocumentation(Draft).md)
+format which is also used by the [FLARE](https://github.com/medizininformatik-initiative/flare/blob/main/docs/api.md)
+service.
+
 ## Backend API
 
 > [!NOTE]
@@ -71,8 +111,8 @@ Protected endpoints can be accessed with a **Session cookie** (public clients) o
 > | `203`     |                            | `Location: {request (uu)id}` |                                                          |
 > | `503`     | `text/plain;charset=UTF-8` |                              | _No feasibility service subscribed to execute the query_ |
 
-> [!IMPORTANT]
-> The actual feasibility result can be obtained by polling the endpoint returned by the `Location`-Header
+⚠️ The actual feasibility result can be obtained by polling the endpoint returned by the `Location`-Header. Currently,
+requests are not accepted if no execution service is connected via websocket.
 
 ##### Example cURL (with token)
 
@@ -84,6 +124,9 @@ Protected endpoints can be accessed with a **Session cookie** (public clients) o
 
 <details>
  <summary><code>GET</code> <code><b>/feasibility/request/{id}</b></code> <code>(get a feasibility result by id)</code></summary>
+
+Request execution is asynchronous. If the result isn't available yet, this will return a `404`.
+All other responses are returned as is from the feasibility request execution service.
 
 ##### Parameters
 
@@ -102,9 +145,6 @@ Protected endpoints can be accessed with a **Session cookie** (public clients) o
 > | `200`                                                          |                            | FeasibilityRequest                                    |
 > | `404`                                                          |                            |                                                       |
 > | <code>503</code><br /><code>504</code><br /><code>500</code> | `text/plain;charset=UTF-8` | Delegated error response from the feasibility service |
-
-> [!IMPORTANT]
-> The actual feasibility result can be obtained by polling the endpoint returned by the `Location`-Header
 
 ##### Example cURL (with token)
 
