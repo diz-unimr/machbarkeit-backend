@@ -114,12 +114,7 @@ Protected endpoints can be accessed with a **Session cookie** (public clients) o
 
 </details>
 
-------------------------------------------------------------------------------------------
-
-#### Feasibility websocket (wss)
-
-> [!IMPORTANT]
-> Authentication required
+**Feasibility websocket (wss)**
 
 <summary><code><b>/feasibility/ws</b></code> <code>(subscribe to incoming feasibility requests)</code></summary>
 
