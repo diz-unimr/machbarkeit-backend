@@ -2,7 +2,7 @@ FROM rust:1.87.0-alpine3.22 AS build
 
 RUN set -ex && \
     apk add --no-progress --no-cache \
-        musl-dev pkgconf openssl-dev openssl-libs-static make cmake g++
+        curl musl-dev pkgconf openssl-dev openssl-libs-static make cmake g++
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock /app/
