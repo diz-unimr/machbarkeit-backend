@@ -56,27 +56,27 @@ service.
 
 Protected endpoints can be accessed with a **Session cookie** (public clients) or **Bearer token** (confidential)
 
-#### Authentication
+### Authentication
 
 <details>
  <summary><code>GET</code> <code><b>/login</b></code> <code>(login to obtain a session cookie)</code></summary>
 
-##### Parameters
+#### Parameters
 
 > None
 
-##### Body
+#### Body
 
 > None
 
-##### Responses
+#### Responses
 
 > | http code | header                                       | response            |
 > |-----------|----------------------------------------------|---------------------|
 > | `200`     |                                              |                     |
 > | `307`     | _On success:_ `Set-Cookie: {session cookie}` | `(Redirect to IDP)` |
 
-##### Example cURL (with token)
+#### Example cURL (with token)
 
 > ```sh
 >  curl -X GET http://localhost:3000/login
@@ -86,7 +86,7 @@ Protected endpoints can be accessed with a **Session cookie** (public clients) o
 
 ------------------------------------------------------------------------------------------
 
-#### Feasibility
+### Feasibility
 
 > [!IMPORTANT]
 > Authentication required
@@ -94,17 +94,17 @@ Protected endpoints can be accessed with a **Session cookie** (public clients) o
 <details>
  <summary><code>POST</code> <code><b>/feasibility/request</b></code> <code>(create a feasibility request)</code></summary>
 
-##### Parameters
+#### Parameters
 
 > None
 
-##### Body
+#### Body
 
 > | content-type          | data type             | required |
 > |-----------------------|-----------------------|----------|
 > | `application/sq+json` | Structured query (sq) | true     |
 
-##### Responses
+#### Responses
 
 > | http code | content-type               | header                       | response                                                 |
 > |-----------|----------------------------|------------------------------|----------------------------------------------------------|
@@ -114,7 +114,7 @@ Protected endpoints can be accessed with a **Session cookie** (public clients) o
 ⚠️ The actual feasibility result can be obtained by polling the endpoint returned by the `Location`-Header. Currently,
 requests are not accepted if no execution service is connected via websocket.
 
-##### Example cURL (with token)
+#### Example cURL (with token)
 
 > ```sh
 >  curl -X POST -H "Authorization: Bearer {access token}" http://localhost:3000/feasibility/request
@@ -128,17 +128,17 @@ requests are not accepted if no execution service is connected via websocket.
 Request execution is asynchronous. If the result isn't available yet, this will return a `404`.
 All other responses are returned as is from the feasibility request execution service.
 
-##### Parameters
+#### Parameters
 
 > | name |  type      | data type      | description                            |
 > |------|------------|----------------|----------------------------------------|
 > | `id` |  required  | string         | The request's unique identifier (uuid) |
 
-##### Body
+#### Body
 
 > None
 
-##### Responses
+#### Responses
 
 > | http code                                                      | content-type               | response                                              |
 > |----------------------------------------------------------------|----------------------------|-------------------------------------------------------|
@@ -146,7 +146,7 @@ All other responses are returned as is from the feasibility request execution se
 > | `404`                                                          |                            |                                                       |
 > | <code>503</code><br /><code>504</code><br /><code>500</code> | `text/plain;charset=UTF-8` | Delegated error response from the feasibility service |
 
-##### Example cURL (with token)
+#### Example cURL (with token)
 
 > ```sh
 >  curl -X GET -H "Authorization: Bearer {access token}" http://localhost:3000/feasibility/request/00000000-0000-0000-0000-000000000000
@@ -160,7 +160,7 @@ All other responses are returned as is from the feasibility request execution se
 
 ------------------------------------------------------------------------------------------
 
-#### Metadata repository (MDR) API
+### Metadata repository (MDR) API
 
 > [!IMPORTANT]
 > Authentication required
@@ -188,7 +188,7 @@ Application properties are read from a properties file ([app.yaml](./app.yaml)) 
 Override configuration properties by providing environment variables with their respective property names. Replace `.`
 with double underscore (`__`).
 
-### Example deployment
+## Example deployment
 
 Docker compose:
 
