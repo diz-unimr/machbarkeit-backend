@@ -14,11 +14,11 @@ app in order to provide:
 - Ontology data via the MDR service (configured)
 - (Asynchronous) Feasibility request execution
 
-# Ontology
+## Ontology
 
 Ontology data is proxied through the MDR service (see API)
 
-# Feasibility requests
+## Feasibility requests
 
 Feasibility request handling is done asynchronously.<br/>
 Clients can send feasibility requests via the API endpoint `/feasibility/request` (see API below). If accepted (202),
@@ -27,7 +27,7 @@ the backend provides the result url in the `Location`-Header of the response.
 This url can then be polled for the feasibility result which will return a 404 response if the result is not yet
 available (poll again!) or the actual result otherwise.
 
-## Broker scenario
+### Broker scenario
 
 This supports request execution against data repositories in protected networks that are not directly accessible from
 the backend.<br />
@@ -41,7 +41,7 @@ The persisted request is then updated with the result data and can be obtained b
 
 ![machbarkeit broker / query scenario](img/machbarkeit_architecture_sm.png)
 
-## Format
+### Format
 
 Feasibility requests are represented in the
 [structured query](https://github.com/num-codex/codex-structured-query/blob/main/structured-query/documentation/2021_01_29StructeredQueriesDocumentation(Draft).md)
