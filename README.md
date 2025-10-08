@@ -10,9 +10,11 @@
 
 ## Backend API
 
-> [!IMPORTANT]
+> [!NOTE]
 > Endpoints are protected via OIDC. Authentication is supported via Authorization Code flow (see `/login`) or Bearer
 > token with an Access token obtained from the Identity Provider (confidential client).
+
+Protected endpoints can be accessed with a **Session cookie** (public clients) or **Bearer token** (confidential)
 
 #### Authentication
 
@@ -34,7 +36,7 @@
 > | `200`     |                                              |                     |
 > | `307`     | _On success:_ `Set-Cookie: {session cookie}` | `(Redirect to IDP)` |
 
-##### Example cURL
+##### Example cURL (with token)
 
 > ```sh
 >  curl -X GET http://localhost:3000/login
@@ -72,7 +74,7 @@
 > [!IMPORTANT]
 > The actual feasibility result can be obtained by polling the endpoint returned by the `Location`-Header
 
-##### Example cURL
+##### Example cURL (with token)
 
 > ```sh
 >  curl -X POST -H "Authorization: Bearer {access token}" http://localhost:3000/feasibility/request
@@ -104,10 +106,10 @@
 > [!IMPORTANT]
 > The actual feasibility result can be obtained by polling the endpoint returned by the `Location`-Header
 
-##### Example cURL
+##### Example cURL (with token)
 
 > ```sh
->  curl -X GET http://localhost:3000/feasibility/request/00000000-0000-0000-0000-000000000000
+>  curl -X GET -H "Authorization: Bearer {access token}" http://localhost:3000/feasibility/request/00000000-0000-0000-0000-000000000000
 > ```
 
 </details>
@@ -157,7 +159,7 @@ Docker compose:
 
 ```yaml
 backend:
-image: ghcr.io/diz-unimr/machbarkeit-backend:1.2.9
+image: ghcr.io/diz-unimr/machbarkeit-backend:1.2.10
 environment:
   LOG_LEVEL: debug
   BASE_URL: http://localhost:3000
