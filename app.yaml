@@ -1,4 +1,4 @@
-log_level: debug
+log_level: info
 base_url: http://localhost:3000
 #auth:
 #  oidc:
@@ -8,7 +8,7 @@ base_url: http://localhost:3000
 #cors:
 #  allow_origin:
 session:
-  lifetime: 86400 # 15 days
+  lifetime: 86400 # 1 day
   cross_domain: false
 #mdr:
 #  endpoint:
