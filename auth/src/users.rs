@@ -1,6 +1,6 @@
 use async_oidc_jwt_validator::OidcValidator;
 use axum::http::header::AUTHORIZATION;
-use axum_login::{tracing, AuthUser, AuthnBackend, UserId};
+use axum_login::{AuthUser, AuthnBackend, UserId};
 use log::{debug, error};
 use oauth2::{
     basic::{BasicClient, BasicRequestTokenError}, url::Url, AuthorizationCode, CsrfToken, EndpointNotSet, EndpointSet,
@@ -139,7 +139,6 @@ impl AuthnBackend for Backend {
         &self,
         creds: Self::Credentials,
     ) -> Result<Option<Self::User>, Self::Error> {
-        tracing::debug!("credentials: {:#?}", creds);
         match creds {
             Credentials::Bearer(bearer_creds) => {
                 match self
