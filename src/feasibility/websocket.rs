@@ -102,7 +102,10 @@ mod tests {
         });
 
         // test server
-        let router = router().merge(api::router()).with_state(state);
+        let router = router()
+            .merge(api::router())
+            .with_state(state)
+            .into_make_service_with_connect_info::<SocketAddr>();
         let server = TestServer::builder()
             .http_transport()
             .build(router)

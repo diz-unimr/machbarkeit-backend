@@ -207,6 +207,7 @@ mod tests {
     use super::*;
     use axum_test::TestServer;
     use sqlx::SqlitePool;
+    use std::net::SocketAddr;
     use tokio::sync::broadcast;
 
     #[sqlx::test]
@@ -223,7 +224,8 @@ mod tests {
         // test server
         let router = crate::feasibility::websocket::router()
             .merge(router())
-            .with_state(state);
+            .with_state(state)
+            .into_make_service_with_connect_info::<SocketAddr>();
         let server = TestServer::builder()
             .http_transport()
             .build(router)
