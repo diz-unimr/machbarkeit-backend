@@ -1,5 +1,6 @@
-use axum::extract::{State, WebSocketUpgrade};
+use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
 use axum::Router;
+use std::net::SocketAddr;
 
 use crate::feasibility::api;
 use crate::server::ApiContext;
@@ -10,7 +11,7 @@ use futures_util::{
     sink::SinkExt,
     stream::{SplitStream, StreamExt},
 };
-use log::error;
+use log::{error, warn};
 use std::sync::Arc;
 use tracing::log::{debug, info};
 
@@ -21,12 +22,13 @@ pub(crate) fn router() -> Router<Arc<ApiContext>> {
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<ApiContext>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
-    info!("Upgrading websocket connection");
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+    debug!("Upgrading websocket connection from: {}", addr);
+    ws.on_upgrade(move |socket| handle_socket(socket, addr, state))
 }
 
-async fn handle_socket(socket: WebSocket, state: Arc<ApiContext>) {
+async fn handle_socket(socket: WebSocket, addr: SocketAddr, state: Arc<ApiContext>) {
     let (mut sink, stream) = socket.split();
     let mut receiver = state.sender.subscribe();
 
@@ -40,28 +42,41 @@ async fn handle_socket(socket: WebSocket, state: Arc<ApiContext>) {
     });
 
     // read incoming messages
-    tokio::spawn(ws_read(stream, state));
+    tokio::spawn(ws_read(stream, addr, state));
 }
 
-async fn ws_read(mut receiver: SplitStream<WebSocket>, state: Arc<ApiContext>) {
-    info!("Reading websocket connection");
-    while let Some(Ok(msg)) = receiver.next().await {
-        match msg {
-            Message::Text(msg) => {
-                debug!("Message received: {}", msg);
+async fn ws_read(
+    receiver: SplitStream<WebSocket>,
+    addr: SocketAddr,
+    state: Arc<ApiContext>,
+) -> Result<(), anyhow::Error> {
+    info!("Websocket connected from: {}", addr);
 
-                // store result
-                if let Err(err) = api::store_result(msg, state.clone()).await {
-                    error!("Failed to store feasibility result: {}", err);
+    receiver
+        .for_each_concurrent(10, |m| async {
+            match m {
+                Ok(Message::Text(msg)) => {
+                    debug!("Message received: {}", msg);
+
+                    // store result
+                    if let Err(err) = api::store_result(msg, state.clone()).await {
+                        error!("Failed to store feasibility result: {}", err);
+                    }
+                }
+                Ok(Message::Close(_)) => {
+                    debug!("Closing WebSocket connection");
+                }
+                Ok(_) => error!("Unexpected websocket message"),
+                Err(e) => {
+                    warn!("Websocket client {}: {}", addr, e);
+                    return;
                 }
             }
-            Message::Close(_) => {
-                debug!("Closing WebSocket connection");
-                break;
-            }
-            _ => error!("Unexpected message type"),
-        }
-    }
+        })
+        .await;
+
+    debug!("Websocket closed from: {}", addr);
+    Ok(())
 }
 
 #[cfg(test)]
