@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use axum_login::AuthUser;
 use chrono::{DateTime, Utc};
 use http::header::LOCATION;
+use log::info;
 use serde_derive::{Deserialize, Serialize};
 use sqlx::types::{JsonValue, Uuid};
 use sqlx::FromRow;
@@ -102,6 +103,8 @@ pub(crate) async fn create(
         user_id: auth_session.ok().map(|a| a.user.map(|u| u.id())).flatten(),
     };
 
+    info!("Create feasibility request: id={}", request.id);
+
     let result: FeasibilityRequest = sqlx::query_as!(
         FeasibilityRequest,
         r#"insert into requests (id,date,query,status,result_code,result_body,result_duration,user_id) values ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -184,6 +187,7 @@ pub(crate) async fn store_result(
     state: Arc<ApiContext>,
 ) -> Result<(), anyhow::Error> {
     let request = serde_json::from_str::<FeasibilityRequest>(&msg)?;
+    info!("Storing feasibility result: id={}", request.id);
 
     sqlx::query_as!(
         FeasibilityRequest,

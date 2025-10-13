@@ -11,7 +11,7 @@ use futures_util::{
     sink::SinkExt,
     stream::{SplitStream, StreamExt},
 };
-use log::{error, warn};
+use log::{error, trace, warn};
 use std::sync::Arc;
 use tracing::log::{debug, info};
 
@@ -50,13 +50,13 @@ async fn ws_read(
     addr: SocketAddr,
     state: Arc<ApiContext>,
 ) -> Result<(), anyhow::Error> {
-    info!("Websocket connected from: {}", addr);
+    info!("Websocket client connected from {}", addr);
 
     receiver
-        .for_each_concurrent(10, |m| async {
+        .for_each_concurrent(42, |m| async {
             match m {
                 Ok(Message::Text(msg)) => {
-                    debug!("Message received: {}", msg);
+                    trace!("Message received: {}", msg);
 
                     // store result
                     if let Err(err) = api::store_result(msg, state.clone()).await {
@@ -64,7 +64,7 @@ async fn ws_read(
                     }
                 }
                 Ok(Message::Close(_)) => {
-                    debug!("Closing WebSocket connection");
+                    info!("Closing WebSocket connection from {}", addr);
                 }
                 Ok(_) => error!("Unexpected websocket message"),
                 Err(e) => {
@@ -75,7 +75,7 @@ async fn ws_read(
         })
         .await;
 
-    debug!("Websocket closed from: {}", addr);
+    info!("Websocket closed from {}", addr);
     Ok(())
 }
 
