@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use axum_login::AuthUser;
 use chrono::{DateTime, Utc};
 use http::header::LOCATION;
+use log::info;
 use serde_derive::{Deserialize, Serialize};
 use sqlx::types::{JsonValue, Uuid};
 use sqlx::FromRow;
@@ -99,8 +100,10 @@ pub(crate) async fn create(
         result_code: None,
         result_body: None,
         result_duration: None,
-        user_id: auth_session.ok().map(|a| a.user.map(|u| u.id())).flatten(),
+        user_id: auth_session.ok().and_then(|a| a.user.map(|u| u.id())),
     };
+
+    info!("Create feasibility request: id={}", request.id);
 
     let result: FeasibilityRequest = sqlx::query_as!(
         FeasibilityRequest,
@@ -184,6 +187,7 @@ pub(crate) async fn store_result(
     state: Arc<ApiContext>,
 ) -> Result<(), anyhow::Error> {
     let request = serde_json::from_str::<FeasibilityRequest>(&msg)?;
+    info!("Storing feasibility result: id={}", request.id);
 
     sqlx::query_as!(
         FeasibilityRequest,
@@ -207,6 +211,7 @@ mod tests {
     use super::*;
     use axum_test::TestServer;
     use sqlx::SqlitePool;
+    use std::net::SocketAddr;
     use tokio::sync::broadcast;
 
     #[sqlx::test]
@@ -223,14 +228,15 @@ mod tests {
         // test server
         let router = crate::feasibility::websocket::router()
             .merge(router())
-            .with_state(state);
+            .with_state(state)
+            .into_make_service_with_connect_info::<SocketAddr>();
         let server = TestServer::builder()
             .http_transport()
             .build(router)
             .unwrap();
 
         let mut websocket = server
-            .get_websocket(&"/feasibility/ws")
+            .get_websocket("/feasibility/ws")
             .await
             .into_websocket()
             .await;

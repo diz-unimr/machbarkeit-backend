@@ -17,6 +17,7 @@ use log::debug;
 use oauth2::basic::BasicClient;
 use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use sqlx::SqlitePool;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
@@ -69,7 +70,12 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     debug!("listening on {}", listener.local_addr()?);
-    axum::serve(listener, router).await.map_err(|e| e.into())
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .map_err(|e| e.into())
 }
 
 #[derive(OpenApi)]

@@ -1,5 +1,6 @@
-use axum::extract::{State, WebSocketUpgrade};
+use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
 use axum::Router;
+use std::net::SocketAddr;
 
 use crate::feasibility::api;
 use crate::server::ApiContext;
@@ -10,7 +11,7 @@ use futures_util::{
     sink::SinkExt,
     stream::{SplitStream, StreamExt},
 };
-use log::error;
+use log::{error, trace, warn};
 use std::sync::Arc;
 use tracing::log::{debug, info};
 
@@ -21,12 +22,13 @@ pub(crate) fn router() -> Router<Arc<ApiContext>> {
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<ApiContext>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
-    info!("Upgrading websocket connection");
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+    debug!("Upgrading websocket connection from: {addr}");
+    ws.on_upgrade(move |socket| handle_socket(socket, addr, state))
 }
 
-async fn handle_socket(socket: WebSocket, state: Arc<ApiContext>) {
+async fn handle_socket(socket: WebSocket, addr: SocketAddr, state: Arc<ApiContext>) {
     let (mut sink, stream) = socket.split();
     let mut receiver = state.sender.subscribe();
 
@@ -40,38 +42,53 @@ async fn handle_socket(socket: WebSocket, state: Arc<ApiContext>) {
     });
 
     // read incoming messages
-    tokio::spawn(ws_read(stream, state));
+    tokio::spawn(ws_read(stream, addr, state));
 }
 
-async fn ws_read(mut receiver: SplitStream<WebSocket>, state: Arc<ApiContext>) {
-    info!("Reading websocket connection");
-    while let Some(Ok(msg)) = receiver.next().await {
-        match msg {
-            Message::Text(msg) => {
-                debug!("Message received: {}", msg);
+async fn ws_read(
+    receiver: SplitStream<WebSocket>,
+    addr: SocketAddr,
+    state: Arc<ApiContext>,
+) -> Result<(), anyhow::Error> {
+    info!("Websocket client connected from {addr}");
 
-                // store result
-                if let Err(err) = api::store_result(msg, state.clone()).await {
-                    error!("Failed to store feasibility result: {}", err);
+    receiver
+        .for_each_concurrent(42, |m| async {
+            match m {
+                Ok(Message::Text(msg)) => {
+                    trace!("Message received: {msg}");
+
+                    // store result
+                    if let Err(err) = api::store_result(msg, state.clone()).await {
+                        error!("Failed to store feasibility result: {err}");
+                    }
+                }
+                Ok(Message::Close(_)) => {
+                    info!("Closing WebSocket connection from {addr}");
+                }
+                Ok(_) => error!("Unexpected websocket message"),
+                Err(e) => {
+                    warn!("Websocket client {addr}: {e}");
                 }
             }
-            Message::Close(_) => {
-                debug!("Closing WebSocket connection");
-                break;
-            }
-            _ => error!("Unexpected message type"),
-        }
-    }
+        })
+        .await;
+
+    info!("Websocket closed from {addr}");
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum_test::TestServer;
+    use axum_test::{TestResponse, TestServer};
     use http::StatusCode;
     use sqlx::types::JsonValue;
     use sqlx::SqlitePool;
+
     use tokio::sync::broadcast;
+    use tokio_retry::strategy::FixedInterval;
+    use tokio_retry::Retry;
 
     #[sqlx::test]
     async fn websocket_read_test(pool: SqlitePool) {
@@ -87,14 +104,17 @@ mod tests {
         });
 
         // test server
-        let router = router().merge(api::router()).with_state(state);
+        let router = router()
+            .merge(api::router())
+            .with_state(state)
+            .into_make_service_with_connect_info::<SocketAddr>();
         let server = TestServer::builder()
             .http_transport()
             .build(router)
             .unwrap();
 
         let mut websocket = server
-            .get_websocket(&"/feasibility/ws")
+            .get_websocket("/feasibility/ws")
             .await
             .into_websocket()
             .await;
@@ -116,13 +136,25 @@ mod tests {
         // send message through websocket
         websocket.send_json(&msg).await;
 
-        // check result
-        let response = server
-            .get(format!("/feasibility/request/{}", updated.id).as_str())
-            .await;
+        // poll result fn
+        let result_fn = async || {
+            let response: TestResponse = server
+                .get(format!("/feasibility/request/{}", updated.id).as_str())
+                .await;
+
+            match response.status_code() {
+                StatusCode::OK => Ok(response),
+                StatusCode::NOT_FOUND => Err("Status code is 404"),
+                _ => Err("Status code is not 200"),
+            }
+        };
+        // ... with retry
+        let response = Retry::spawn(FixedInterval::from_millis(100).take(3), result_fn)
+            .await
+            .expect("Polling response timed out");
 
         // assert
         response.assert_status(StatusCode::OK);
-        response.assert_text(&updated.result_body.unwrap());
+        response.assert_text(updated.result_body.unwrap());
     }
 }
