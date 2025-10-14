@@ -100,7 +100,7 @@ pub(crate) async fn create(
         result_code: None,
         result_body: None,
         result_duration: None,
-        user_id: auth_session.ok().map(|a| a.user.map(|u| u.id())).flatten(),
+        user_id: auth_session.ok().and_then(|a| a.user.map(|u| u.id())),
     };
 
     info!("Create feasibility request: id={}", request.id);
@@ -236,7 +236,7 @@ mod tests {
             .unwrap();
 
         let mut websocket = server
-            .get_websocket(&"/feasibility/ws")
+            .get_websocket("/feasibility/ws")
             .await
             .into_websocket()
             .await;

@@ -42,3 +42,4 @@ utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 
 [dev-dependencies]
 httpmock = "0.8.1"
+tokio-retry = "0.3.0"

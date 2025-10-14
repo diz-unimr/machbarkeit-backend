@@ -14,7 +14,7 @@ pub struct DiscoveryDocument {
 
 impl DiscoveryDocument {
     pub async fn new(issuer_url: &str) -> Result<Self, anyhow::Error> {
-        Ok(discover(issuer_url).await?)
+        discover(issuer_url).await
     }
 }
 

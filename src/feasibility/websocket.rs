@@ -24,7 +24,7 @@ async fn ws_handler(
     State(state): State<Arc<ApiContext>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
-    debug!("Upgrading websocket connection from: {}", addr);
+    debug!("Upgrading websocket connection from: {addr}");
     ws.on_upgrade(move |socket| handle_socket(socket, addr, state))
 }
 
@@ -50,43 +50,45 @@ async fn ws_read(
     addr: SocketAddr,
     state: Arc<ApiContext>,
 ) -> Result<(), anyhow::Error> {
-    info!("Websocket client connected from {}", addr);
+    info!("Websocket client connected from {addr}");
 
     receiver
         .for_each_concurrent(42, |m| async {
             match m {
                 Ok(Message::Text(msg)) => {
-                    trace!("Message received: {}", msg);
+                    trace!("Message received: {msg}");
 
                     // store result
                     if let Err(err) = api::store_result(msg, state.clone()).await {
-                        error!("Failed to store feasibility result: {}", err);
+                        error!("Failed to store feasibility result: {err}");
                     }
                 }
                 Ok(Message::Close(_)) => {
-                    info!("Closing WebSocket connection from {}", addr);
+                    info!("Closing WebSocket connection from {addr}");
                 }
                 Ok(_) => error!("Unexpected websocket message"),
                 Err(e) => {
-                    warn!("Websocket client {}: {}", addr, e);
-                    return;
+                    warn!("Websocket client {addr}: {e}");
                 }
             }
         })
         .await;
 
-    info!("Websocket closed from {}", addr);
+    info!("Websocket closed from {addr}");
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum_test::TestServer;
+    use axum_test::{TestResponse, TestServer};
     use http::StatusCode;
     use sqlx::types::JsonValue;
     use sqlx::SqlitePool;
+
     use tokio::sync::broadcast;
+    use tokio_retry::strategy::FixedInterval;
+    use tokio_retry::Retry;
 
     #[sqlx::test]
     async fn websocket_read_test(pool: SqlitePool) {
@@ -112,7 +114,7 @@ mod tests {
             .unwrap();
 
         let mut websocket = server
-            .get_websocket(&"/feasibility/ws")
+            .get_websocket("/feasibility/ws")
             .await
             .into_websocket()
             .await;
@@ -134,13 +136,25 @@ mod tests {
         // send message through websocket
         websocket.send_json(&msg).await;
 
-        // check result
-        let response = server
-            .get(format!("/feasibility/request/{}", updated.id).as_str())
-            .await;
+        // poll result fn
+        let result_fn = async || {
+            let response: TestResponse = server
+                .get(format!("/feasibility/request/{}", updated.id).as_str())
+                .await;
+
+            match response.status_code() {
+                StatusCode::OK => Ok(response),
+                StatusCode::NOT_FOUND => Err("Status code is 404"),
+                _ => Err("Status code is not 200"),
+            }
+        };
+        // ... with retry
+        let response = Retry::spawn(FixedInterval::from_millis(100).take(3), result_fn)
+            .await
+            .expect("Polling response timed out");
 
         // assert
         response.assert_status(StatusCode::OK);
-        response.assert_text(&updated.result_body.unwrap());
+        response.assert_text(updated.result_body.unwrap());
     }
 }
