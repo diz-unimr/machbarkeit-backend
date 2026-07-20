@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use log::debug;
+use oauth2::reqwest;
 use serde_derive::Deserialize;
 
 #[derive(Deserialize)]
