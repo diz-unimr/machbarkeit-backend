@@ -3,7 +3,8 @@ use axum::http::header::AUTHORIZATION;
 use axum_login::{AuthUser, AuthnBackend, UserId};
 use log::{debug, error};
 use oauth2::{
-    basic::{BasicClient, BasicRequestTokenError}, url::Url, AuthorizationCode, CsrfToken, EndpointNotSet, EndpointSet,
+    basic::{BasicClient, BasicRequestTokenError}, reqwest, url::Url, AuthorizationCode, CsrfToken, EndpointNotSet,
+    EndpointSet,
     Scope,
     TokenResponse,
 };
