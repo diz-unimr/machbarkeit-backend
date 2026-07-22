@@ -1,6 +1,7 @@
 use axum::extract::{Path, State};
 use axum::{debug_handler, Json, Router};
 use http::{header, StatusCode};
+use std::cmp::max;
 
 use crate::error::ApiError;
 use crate::server::ApiContext;
@@ -9,6 +10,7 @@ use auth::users::AuthSession;
 use axum::extract::ws::Utf8Bytes;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
+use axum_extra::extract::OptionalQuery;
 use axum_login::AuthUser;
 use chrono::{DateTime, Utc};
 use http::header::LOCATION;
@@ -23,6 +25,7 @@ pub(crate) fn router() -> Router<Arc<ApiContext>> {
     Router::new()
         .route("/feasibility/request", post(create))
         .route("/feasibility/request/{id}", get(read))
+        .route("/feasibility/request", get(read_all))
 }
 
 #[derive(ToSchema, Clone, Debug, PartialEq, PartialOrd, sqlx::Type, Deserialize, Serialize)]
@@ -31,6 +34,14 @@ pub(crate) fn router() -> Router<Arc<ApiContext>> {
 pub(crate) enum QueryState {
     Pending,
     Completed,
+}
+
+#[derive(ToSchema, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ResultState {
+    Pending,
+    Completed,
+    Error,
 }
 
 impl Into<String> for QueryState {
@@ -56,6 +67,33 @@ pub(crate) struct FeasibilityRequest {
     pub(crate) result_duration: Option<u32>,
     #[serde(skip)]
     user_id: Option<i64>,
+}
+
+#[derive(ToSchema, Serialize)]
+pub(crate) struct FeasibilityResult {
+    pub(crate) id: Uuid,
+    date: DateTime<Utc>,
+    query: JsonValue,
+    pub(crate) status: ResultState,
+    pub(crate) result: Option<u32>,
+    pub(crate) duration: u32,
+}
+
+impl From<FeasibilityRequest> for FeasibilityResult {
+    fn from(request: FeasibilityRequest) -> Self {
+        FeasibilityResult {
+            id: request.id,
+            date: request.date,
+            query: request.query,
+            status: match (request.result_code, request.status) {
+                (_, QueryState::Pending) => ResultState::Pending,
+                (Some(200), QueryState::Completed) => ResultState::Completed,
+                (_, QueryState::Completed) => ResultState::Error,
+            },
+            result: request.result_body.and_then(|r| r.parse().ok()),
+            duration: request.result_duration.unwrap_or_default(),
+        }
+    }
 }
 
 /// Create a Feasibility request
@@ -156,12 +194,18 @@ pub(crate) async fn read(
 ) -> Result<impl IntoResponse, ApiError> {
     let result: Option<FeasibilityRequest> = sqlx::query_as!(
         FeasibilityRequest,
-        r#"select id as "id!:_",date as "date!:_" ,query as "query!:_",status as "status!:_",result_code as "result_code:_",result_body,result_duration as "result_duration:_", user_id
+        r#"select id as "id!:_",
+        date as "date!:_" ,
+        query as "query!:_",
+        status as "status!:_",
+        result_code as "result_code:_",
+        result_body,result_duration as "result_duration:_",
+        user_id
         from requests where id = $1"#,
         id
     )
-        .fetch_optional(&ctx.db)
-        .await?;
+    .fetch_optional(&ctx.db)
+    .await?;
     match result {
         Some(r) => match r.status {
             QueryState::Pending => Ok(StatusCode::NOT_FOUND.into_response()),
@@ -180,6 +224,49 @@ pub(crate) async fn read(
         },
         None => Ok(StatusCode::NOT_FOUND.into_response()),
     }
+}
+
+/// Get Feasibility requests for a user
+#[utoipa::path(
+    get,
+    path = "/feasibility/request",
+    responses(
+        (status = 200, description = "Ok", body = Vec<FeasibilityResult>),
+        (status = 401, description = "Unauthorized", body = String),
+    ),
+    tag = "feasibility"
+)]
+#[debug_handler]
+pub(crate) async fn read_all(
+    auth_session: AuthSession,
+    State(ctx): State<Arc<ApiContext>>,
+    OptionalQuery(limit): OptionalQuery<i64>,
+) -> Result<impl IntoResponse, ApiError> {
+    let user_id = auth_session
+        .user
+        .map(|u| u.id())
+        .ok_or(anyhow!("Failed to extract user from session"))
+        .map_err(|e| ApiError(e, StatusCode::UNAUTHORIZED))?;
+
+    let limit = max(limit.unwrap_or(50), 50);
+
+    Ok(Json(
+        sqlx::query_as!(
+            FeasibilityRequest,
+            r#"select r.id as "id!:_",
+        r.date as "date!:_" ,
+        r.query as "query!:_",
+        r.status as "status!:_",
+        r.result_code as "result_code:_",
+        r.result_body,result_duration as "result_duration:_",
+        r.user_id
+        from requests r inner join users u on r.user_id = u.id where r.user_id = $1 order by r.date desc limit $2"#,
+            user_id,
+            limit
+        )
+        .fetch_all(&ctx.db)
+        .await?.into_iter().map(FeasibilityResult::from).collect::<Vec<_>>(),
+    ))
 }
 
 pub(crate) async fn store_result(
