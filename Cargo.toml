@@ -39,7 +39,9 @@ axum-reverse-proxy = { version = "1.0.3", features = ["tls", "native-tls"] }
 utoipa = { version = "5.4.0", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 tower-sessions = "0.14.0"
+tower = "0.5.3"
 
 [dev-dependencies]
 httpmock = "0.8.1"
 tokio-retry = "0.3.0"
+http-body-util = "0.1.4"
