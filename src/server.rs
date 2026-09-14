@@ -6,13 +6,13 @@ use async_oidc_jwt_validator::{OidcConfig, OidcValidator};
 use auth::oidc::DiscoveryDocument;
 use auth::users::Backend;
 use axum::routing::get;
-use axum::{middleware, Router};
+use axum::{Router, middleware};
 use axum_login::AuthManagerLayerBuilder;
 use axum_reverse_proxy::ReverseProxy;
 use broadcast::Sender;
+use http::HeaderValue;
 use http::header::{AUTHORIZATION, CONTENT_TYPE, LOCATION};
 use http::method::Method;
-use http::HeaderValue;
 use log::debug;
 use oauth2::basic::BasicClient;
 use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
@@ -22,14 +22,14 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use tower_sessions::{
-    cookie::{time::Duration, SameSite}, Expiry, MemoryStore,
-    SessionManagerLayer,
+use tower_sessions::{Expiry, MemoryStore,
+                     SessionManagerLayer,
+                     cookie::{SameSite, time::Duration},
 };
 use tracing::log;
 use tracing_subscriber::EnvFilter;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
-use utoipa::{openapi, Modify, OpenApi};
+use utoipa::{Modify, OpenApi, openapi};
 use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(Clone)]
@@ -74,8 +74,8 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
         listener,
         router.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .await
-    .map_err(|e| e.into())
+        .await
+        .map_err(|e| e.into())
 }
 
 #[derive(OpenApi)]
@@ -213,7 +213,7 @@ async fn build_api_router(
             discovery.userinfo_endpoint,
             validator,
         )
-        .await;
+            .await;
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
         Ok(router
@@ -230,8 +230,8 @@ mod tests {
     use super::*;
     use crate::config::{Auth, Oidc, Session};
     use axum_test::TestServer;
-    use http::header::ORIGIN;
     use http::StatusCode;
+    use http::header::ORIGIN;
     use httpmock::Method::GET;
     use httpmock::MockServer;
     use serde_json::json;
@@ -333,7 +333,7 @@ mod tests {
                 "/login?next={}",
                 Encoded(config.base_url.to_owned() + req_url).to_string()
             )
-            .to_string(),
+                .to_string(),
         );
 
         // cors header is set

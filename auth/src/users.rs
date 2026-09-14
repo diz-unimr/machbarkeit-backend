@@ -3,10 +3,11 @@ use axum::http::header::AUTHORIZATION;
 use axum_login::{AuthUser, AuthnBackend, UserId};
 use log::{debug, error};
 use oauth2::{
-    basic::{BasicClient, BasicRequestTokenError}, reqwest, url::Url, AuthorizationCode, CsrfToken, EndpointNotSet,
+    AuthorizationCode, CsrfToken, EndpointNotSet,
     EndpointSet,
     Scope,
     TokenResponse,
+    basic::{BasicClient, BasicRequestTokenError}, reqwest, url::Url,
 };
 use serde::Deserialize;
 use serde_derive::Serialize;
@@ -61,7 +62,7 @@ pub struct UserInfo {
 
 #[derive(Clone, Serialize, Deserialize, FromRow)]
 pub struct User {
-    id: i64,
+    pub id: i64,
     pub name: String,
     pub email: String,
     pub access_token: String,
@@ -91,7 +92,7 @@ pub enum BackendError {
 }
 
 pub type BasicClientSet =
-    BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
+BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
 #[derive(Clone)]
 pub struct Backend {
@@ -195,12 +196,12 @@ impl AuthnBackend for Backend {
                         returning *
                         "#,
                 )
-                .bind(user_info.name)
-                .bind(user_info.email)
-                .bind(access_token)
-                .fetch_one(&self.db)
-                .await
-                .map_err(Self::Error::Sqlx)?;
+                    .bind(user_info.name)
+                    .bind(user_info.email)
+                    .bind(access_token)
+                    .fetch_one(&self.db)
+                    .await
+                    .map_err(Self::Error::Sqlx)?;
 
                 Ok(Some(user))
             }
