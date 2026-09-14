@@ -149,7 +149,7 @@ mod tests {
             }
         };
         // ... with retry
-        let response = Retry::spawn(FixedInterval::from_millis(100).take(3), result_fn)
+        let response = Retry::start(FixedInterval::from_millis(100).take(3), result_fn)
             .await
             .expect("Polling response timed out");
 

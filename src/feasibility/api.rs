@@ -1,6 +1,7 @@
 use axum::extract::{Path, State};
-use axum::{debug_handler, Json, Router};
-use http::{header, StatusCode};
+use axum::{Json, Router, debug_handler};
+use http::{StatusCode, header};
+use std::cmp::max;
 
 use crate::error::ApiError;
 use crate::server::ApiContext;
@@ -9,13 +10,14 @@ use auth::users::AuthSession;
 use axum::extract::ws::Utf8Bytes;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
+use axum_extra::extract::OptionalQuery;
 use axum_login::AuthUser;
 use chrono::{DateTime, Utc};
 use http::header::LOCATION;
 use log::info;
 use serde_derive::{Deserialize, Serialize};
-use sqlx::types::{JsonValue, Uuid};
 use sqlx::FromRow;
+use sqlx::types::{JsonValue, Uuid};
 use std::sync::Arc;
 use utoipa::ToSchema;
 
@@ -23,6 +25,7 @@ pub(crate) fn router() -> Router<Arc<ApiContext>> {
     Router::new()
         .route("/feasibility/request", post(create))
         .route("/feasibility/request/{id}", get(read))
+        .route("/feasibility/request", get(read_all))
 }
 
 #[derive(ToSchema, Clone, Debug, PartialEq, PartialOrd, sqlx::Type, Deserialize, Serialize)]
@@ -31,6 +34,14 @@ pub(crate) fn router() -> Router<Arc<ApiContext>> {
 pub(crate) enum QueryState {
     Pending,
     Completed,
+}
+
+#[derive(ToSchema, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ResultState {
+    Pending,
+    Completed,
+    Error,
 }
 
 impl Into<String> for QueryState {
@@ -56,6 +67,33 @@ pub(crate) struct FeasibilityRequest {
     pub(crate) result_duration: Option<u32>,
     #[serde(skip)]
     user_id: Option<i64>,
+}
+
+#[derive(ToSchema, Serialize)]
+pub(crate) struct FeasibilityResult {
+    pub(crate) id: Uuid,
+    date: DateTime<Utc>,
+    query: JsonValue,
+    pub(crate) status: ResultState,
+    pub(crate) result: Option<u32>,
+    pub(crate) duration: u32,
+}
+
+impl From<FeasibilityRequest> for FeasibilityResult {
+    fn from(request: FeasibilityRequest) -> Self {
+        FeasibilityResult {
+            id: request.id,
+            date: request.date,
+            query: request.query,
+            status: match (request.result_code, request.status) {
+                (_, QueryState::Pending) => ResultState::Pending,
+                (Some(200), QueryState::Completed) => ResultState::Completed,
+                (_, QueryState::Completed) => ResultState::Error,
+            },
+            result: request.result_body.and_then(|r| r.parse().ok()),
+            duration: request.result_duration.unwrap_or_default(),
+        }
+    }
 }
 
 /// Create a Feasibility request
@@ -156,7 +194,13 @@ pub(crate) async fn read(
 ) -> Result<impl IntoResponse, ApiError> {
     let result: Option<FeasibilityRequest> = sqlx::query_as!(
         FeasibilityRequest,
-        r#"select id as "id!:_",date as "date!:_" ,query as "query!:_",status as "status!:_",result_code as "result_code:_",result_body,result_duration as "result_duration:_", user_id
+        r#"select id as "id!:_",
+        date as "date!:_" ,
+        query as "query!:_",
+        status as "status!:_",
+        result_code as "result_code:_",
+        result_body,result_duration as "result_duration:_",
+        user_id
         from requests where id = $1"#,
         id
     )
@@ -182,6 +226,49 @@ pub(crate) async fn read(
     }
 }
 
+/// Get Feasibility requests for a user
+#[utoipa::path(
+    get,
+    path = "/feasibility/request",
+    responses(
+        (status = 200, description = "Ok", body = Vec<FeasibilityResult>),
+        (status = 401, description = "Unauthorized", body = String),
+    ),
+    tag = "feasibility"
+)]
+#[debug_handler]
+pub(crate) async fn read_all(
+    auth_session: AuthSession,
+    State(ctx): State<Arc<ApiContext>>,
+    OptionalQuery(limit): OptionalQuery<i64>,
+) -> Result<impl IntoResponse, ApiError> {
+    let user_id = auth_session
+        .user
+        .map(|u| u.id())
+        .ok_or(anyhow!("Failed to extract user from session"))
+        .map_err(|e| ApiError(e, StatusCode::UNAUTHORIZED))?;
+
+    let limit = max(limit.unwrap_or(20), 20);
+
+    Ok(Json(
+        sqlx::query_as!(
+            FeasibilityRequest,
+            r#"select r.id as "id!:_",
+        r.date as "date!:_" ,
+        r.query as "query!:_",
+        r.status as "status!:_",
+        r.result_code as "result_code:_",
+        r.result_body,result_duration as "result_duration:_",
+        r.user_id
+        from requests r inner join users u on r.user_id = u.id where r.user_id = $1 order by r.date desc limit $2"#,
+            user_id,
+            limit
+        )
+            .fetch_all(&ctx.db)
+            .await?.into_iter().map(FeasibilityResult::from).collect::<Vec<_>>(),
+    ))
+}
+
 pub(crate) async fn store_result(
     msg: Utf8Bytes,
     state: Arc<ApiContext>,
@@ -200,8 +287,8 @@ pub(crate) async fn store_result(
         request.result_duration,
         request.id
     )
-    .execute(&state.db)
-    .await?;
+        .execute(&state.db)
+        .await?;
 
     Ok(())
 }
@@ -209,10 +296,26 @@ pub(crate) async fn store_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_oidc_jwt_validator::{OidcConfig, OidcValidator};
+    use auth::users::Backend;
+    use axum::body::Body;
+    use axum_login::AuthManagerLayerBuilder;
     use axum_test::TestServer;
+    use header::CONTENT_TYPE;
+    use http::{HeaderValue, Request};
+    use http_body_util::BodyExt;
+    use httpmock::Method::{GET, POST};
+    use httpmock::MockServer;
+    use oauth2::basic::BasicClient;
+    use oauth2::reqwest::Url;
+    use oauth2::{AuthUrl, ClientId, TokenUrl};
+    use serde_json::{Value, json};
     use sqlx::SqlitePool;
     use std::net::SocketAddr;
     use tokio::sync::broadcast;
+    use tokio::time::timeout;
+    use tower::util::ServiceExt;
+    use tower_sessions::{MemoryStore, SessionManagerLayer};
 
     #[sqlx::test]
     async fn create_test(pool: SqlitePool) {
@@ -250,12 +353,14 @@ mod tests {
             .json(&query.clone())
             .await;
 
-        let ws_msg: FeasibilityRequest = tokio::spawn(async move {
-            let msg = websocket.receive_text().await;
-            serde_json::from_str(msg.as_str()).unwrap()
-        })
-        .await
-        .unwrap();
+        let ws_msg: FeasibilityRequest =
+            tokio::spawn(timeout(std::time::Duration::from_secs(30), async move {
+                let msg = websocket.receive_text().await;
+                serde_json::from_str(msg.as_str()).unwrap()
+            }))
+                .await
+                .unwrap()
+                .expect("timeout receiving data from websocket");
 
         // assert
         response.assert_status(StatusCode::ACCEPTED);
@@ -288,7 +393,158 @@ mod tests {
             .await;
 
         // assert
-        println!("{:?}", response.text());
         response.assert_status(StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[sqlx::test(fixtures("../fixtures/requests.sql"))]
+    async fn read_all_test(pool: SqlitePool) {
+        let (sender, _) = broadcast::channel(1);
+        let state = Arc::new(ApiContext {
+            db: pool,
+            base_url: "http://localhost".to_string(),
+            sender,
+            auth: None,
+            mdr_endpoint: None,
+        });
+
+        // mock idp (and respective client) to simulate user authentication
+        let idp = mock_idp();
+        let client = BasicClient::new(ClientId::new("test".to_string()))
+            .set_auth_uri(AuthUrl::new(format!("{}/auth", idp.base_url()).to_string()).unwrap())
+            .set_token_uri(TokenUrl::new(format!("{}/token", idp.base_url()).to_string()).unwrap());
+
+        let backend = Backend::new(
+            state.db.clone(),
+            client.clone(),
+            format!("{}/userinfo", idp.base_url()),
+            OidcValidator::new(OidcConfig::new(String::new(), String::new(), String::new())),
+        )
+            .await;
+
+        // auth layer
+        let auth_layer =
+            AuthManagerLayerBuilder::new(backend, SessionManagerLayer::new(MemoryStore::default()))
+                .build();
+
+        // router with auth layer
+        let router = router()
+            .merge(crate::auth::router())
+            .layer(auth_layer)
+            .with_state(state);
+
+        // login to get a user session
+        let cookie = oauth_login(&router).await;
+
+        // feasibility request (with session cookie)
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::GET)
+                    .header(header::COOKIE, cookie)
+                    .uri("/feasibility/request")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        println!("{}", String::from_utf8_lossy(&body));
+        let body: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            body,
+            json!([
+                {
+                    "id":"39613561-3764-3163-3434-343834636663",
+                    "date":"2026-04-01T22:00:00Z",
+                    "query": {},
+                    "status": "pending",
+                    "duration": 0,
+                    "result": null,
+                },
+                {
+                    "id":"30623665-3632-6363-6634-653332386365",
+                    "date":"2026-01-01T10:00:00Z",
+                    "query": {},
+                    "status": "completed",
+                    "result": 42,
+                    "duration": 0,
+                }
+            ])
+        )
+    }
+
+    fn mock_idp() -> MockServer {
+        let server = MockServer::start();
+
+        // token endpoint
+        server.mock(|when, then| {
+            when.method(POST).path("/token");
+            then.status(200)
+                .header(CONTENT_TYPE.as_str(), "application/json")
+                .json_body(json!({
+                    "token_type": "Bearer",
+                    "access_token": "eyJ...",
+                }));
+        });
+
+        // userinfo
+        server.mock(|when, then| {
+            when.method(GET).path("/userinfo");
+            then.status(200)
+                .header(CONTENT_TYPE.as_str(), "application/json")
+                .json_body(json!({
+                    "name": "Test",
+                    "email": "Test",
+                }));
+        });
+
+        server
+    }
+
+    async fn oauth_login(router: &Router) -> HeaderValue {
+        // login to get a user session
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::GET)
+                    .uri("/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // get redirect location header
+        let redirect_target = response
+            .headers()
+            .get("Location")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let target_url: Url = redirect_target.parse().unwrap();
+        let state = target_url
+            .query_pairs()
+            .find_map(|(k, v)| if k == "state" { Some(v) } else { None })
+            .unwrap();
+        let cookie = response.headers().get(header::SET_COOKIE).unwrap();
+
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .header(header::COOKIE, cookie)
+                    .uri(format!("/oauth/callback?code=test&state={state}"))
+                    .method("GET")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // return cookie
+        response.headers().get(header::SET_COOKIE).unwrap().clone()
     }
 }
