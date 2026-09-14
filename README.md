@@ -39,7 +39,7 @@ The persisted request is then updated with the result data and can be obtained b
 
 **Example deployment:**
 
-![machbarkeit broker / query scenario](img/machbarkeit_architecture_sm.png)
+![machbarkeit broker / query scenario](img/machbarkeit_architecture_backend.svg)
 
 ### Format
 
