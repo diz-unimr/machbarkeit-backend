@@ -39,7 +39,7 @@ The persisted request is then updated with the result data and can be obtained b
 
 **Example deployment:**
 
-![machbarkeit broker / query scenario](img/machbarkeit_architecture_sm.png)
+![machbarkeit broker / query scenario](img/machbarkeit_architecture_backend.svg)
 
 ### Format
 
@@ -154,6 +154,34 @@ All other responses are returned as is from the feasibility request execution se
 
 </details>
 
+<details>
+ <summary><code>GET</code> <code><b>/feasibility/request</b></code> <code>(get all feasibility requests by user)</code></summary>
+
+Only for authorized users with a **valid session** (OIDC authentication is required).
+
+#### Parameters
+
+> None
+
+#### Body
+
+> None
+
+#### Responses
+
+> | http code                                                    | content-type               | response                                              |
+> |--------------------------------------------------------------|----------------------------|-------------------------------------------------------|
+> | `200`                                                        | application/json           | FeasibilityRequest[]                                  |
+> | `401`                                                        |                            | _Failed to extract user from session_                 |
+
+#### Example cURL (with token)
+
+> ```sh
+>  curl -X GET -H "Cookie: id={session}" http://localhost:3000/feasibility/request
+> ```
+
+</details>
+
 **Feasibility websocket (wss)**
 
 <summary><code><b>/feasibility/ws</b></code> <code>(subscribe to incoming feasibility requests)</code></summary>
@@ -194,7 +222,7 @@ Docker compose:
 
 ```yaml
 backend:
-image: ghcr.io/diz-unimr/machbarkeit-backend:1.2.10
+image: ghcr.io/diz-unimr/machbarkeit-backend:1.3.3
 environment:
   LOG_LEVEL: debug
   BASE_URL: http://localhost:3000
