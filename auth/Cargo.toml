@@ -9,7 +9,7 @@ name = "auth"
 path = "src/lib.rs"
 
 [dependencies]
-axum-login = "0.18.0"
+axum-login = "0.19.0"
 axum = "0.8.4"
 sqlx = { version = "0.9.0", features = ["runtime-tokio", "tls-rustls", "sqlite", "time", "chrono", "migrate"] }
 serde = { version = "1.0.219", features = ["derive"] }
